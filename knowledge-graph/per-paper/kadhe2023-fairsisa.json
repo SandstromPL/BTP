@@ -1,0 +1,1462 @@
+{
+ "paper": {
+  "id": "kadhe2023-fairsisa",
+  "title": "FairSISA: Ensemble Post-Processing to Improve Fairness of Unlearning in LLMs",
+  "short": "FairSISA",
+  "authors": [
+   "Swanand Ravindra Kadhe",
+   "Anisa Halimi",
+   "Ambrish Rawat",
+   "Nathalie Baracaldo"
+  ],
+  "affiliations": [
+   "IBM Research"
+  ],
+  "venue": "NeurIPS 2023 Workshop on Socially Responsible Language Modelling Research (SoLaR)",
+  "year": 2023,
+  "arxiv": "2312.07420",
+  "file": "papers/1/1_2312.07420v1.pdf",
+  "one_liner": "Shows SISA-trained language-model ensembles can be less fair (equalized odds) and fixes this with three Hardt-style post-processing variants, one provably optimal.",
+  "summary": "SISA is an exact unlearning method: it splits training data into S disjoint shards, trains one model per shard, and combines predictions by majority vote, so deleting a point only retrains one shard's model. This paper asks whether that efficiency costs fairness for language models. The authors fine-tune BERT, DistilGPT2 and GPT2 as toxic-text classifiers on HateXplain with S = 1, 3, 5, 7 shards. Fairness is measured with equalized odds (EO): the gap in true- and false-positive rates between posts that mention a sensitive topic (religion or race) and posts that do not. Accuracy drops steadily as S grows. EO moves up and down with S and is often worse than for a single model, so SISA can make models less fair. To fix this without retraining, they adapt Hardt, Price and Srebro's (HPS) equalized-odds post-processing to ensembles in three ways: (1) aggregate votes, then post-process; (2) post-process each shard model, then aggregate; (3) 'ensemble post-processing', one linear program over the whole vector of S predictions plus the attribute. They prove (3) gives the most accurate predictor that exactly satisfies equalized odds using only shard outputs and the attribute. Empirically, (2) usually gives the best trade-off and (3) the highest accuracy at moderate EO.",
+  "problem": "Unlearning methods change how models behave, but their effect on fairness was barely studied, and not at all for language models. SISA is attractive for LLMs because it is exact and works with any architecture. However, it trains each model on a smaller shard and combines them by voting, and this could change group-level error rates. A cheap fix is needed that does not involve retraining the expensive models.",
+  "core_idea": "Leave the SISA models as they are and correct their outputs after the fact. Hardt et al.'s derived-predictor linear program (LP) chooses randomized flip probabilities that satisfy equalized odds at minimum loss. The paper extends it from one binary prediction to the full vector of S constituent predictions: one variable per (prediction pattern, group) pair, 2^(S+1) variables in total. The objective and the TPR/FPR constraints stay linear, so the problem is still an LP, and its solution is the optimal equalized-odds predictor derived from the ensemble.",
+  "setting": "Centralized supervised fine-tuning of pretrained language models (binary toxic-text sequence classification), trained with SISA shards; fairness post-processing at inference time.",
+  "unlearning_type": "exact (SISA; the paper studies the fairness of SISA ensembles and proposes fairness post-processing, but runs no actual deletion requests in its experiments)",
+  "contributions": [
+   "Claimed to be the first study of how unlearning interacts with fairness for LLMs, focusing on the SISA exact-unlearning framework.",
+   "Empirical accuracy-fairness study of SISA (S = 1, 3, 5, 7 shards, no slicing) on HateXplain toxic-text classification with BERT, DistilGPT2 and GPT2: accuracy falls as S increases, and EO varies non-monotonically and can be worse than a single model.",
+   "Three ways to apply HPS equalized-odds post-processing to SISA ensembles: Aggregate-then-Post-process HPS(MAJ(Y1..YS)), Post-process-then-Aggregate MAJ(HPS(Y1),...,HPS(YS)), and Ensemble Post-processing (a new LP over the joint ensemble predictions).",
+   "Proposition 1: ensemble post-processing is an LP in 2^(S+1) variables, with coefficients computable from the joint distribution of (Y1..YS, A, Y), and its solution is an optimal equalized-odds derived predictor for the ensemble. The authors note the result is of independent interest beyond unlearning.",
+   "An extra experiment where one shard is deliberately balanced ('fair') and the others are not. Unmitigated SISA's EO roughly doubles compared with random splitting, and ensemble post-processing gives the highest accuracy at low EO."
+  ],
+  "method_steps": [
+   "Randomly split the fine-tuning set D into S disjoint, roughly equal shards D1..DS. Slicing is not used, because storing per-slice LLM checkpoints is too expensive.",
+   "Fine-tune one pretrained LM (a Hugging Face sequence classifier) per shard, giving constituent models M1..MS. Epochs are chosen from {S, S+1, S+2} by validation accuracy.",
+   "At inference, collect the binary predictions Y1_hat..YS_hat (toxic or not) and the binary sensitive attribute A (whether the text mentions religion, or race).",
+   "Option 1, Aggregate-then-Post-process: compute the majority vote MAJ(Y1..YS), estimate its joint distribution with (A, Y), and solve the 4-variable HPS LP for p_ya = Pr(Y_tilde=1 | MAJ=y, A=a) under equal-TPR and equal-FPR constraints. Output a randomized Y_tilde.",
+   "Option 2, Post-process-then-Aggregate: for each constituent k, solve its own 4-variable HPS LP to get HPS(Yk_hat), then take the majority vote of the S post-processed (randomized) predictions.",
+   "Option 3, Ensemble Post-processing: estimate the joint distribution of (Y1..YS, A, Y). Solve one LP over p_(ybar,a) = Pr(Y_tilde=1 | prediction vector = ybar, A=a) for every ybar in {0,1}^S and a in {0,1} (2^(S+1) variables), minimizing the expected loss subject to equal TPR and equal FPR across groups and 0 <= p <= 1. Output a randomized Y_tilde from a lookup on (prediction vector, A).",
+   "When an unlearning request arrives, SISA retrains only the affected shard's model. The paper does not discuss it, but the post-processor would then have to be refit: one small LP for option 2, the global LP for options 1 and 3."
+  ],
+  "key_definitions": [
+   {
+    "name": "Exact unlearning",
+    "plain": "The model after unlearning has exactly the same distribution as a model retrained from scratch without the deleted data.",
+    "formal": "Dist(U(A(D), Du, Dr)) = Dist(A(Dr)), with Dr = D minus Du"
+   },
+   {
+    "name": "Approximate unlearning",
+    "plain": "The unlearned and retrained model distributions only need to be statistically close, usually in a differential-privacy-like sense.",
+    "formal": "U(A(D),Du,Dr) is (eps,delta)-indistinguishable from A(Dr) (DP-style)"
+   },
+   {
+    "name": "SISA",
+    "plain": "Split the data into S disjoint shards (each optionally split further into R slices with checkpoints), train one constituent model per shard, and combine predictions by majority vote. To unlearn, retrain only the affected shard, starting from the slice that held the deleted point.",
+    "formal": "D = D1 u ... u DS (disjoint); prediction = MAJ(M1(x),...,MS(x))"
+   },
+   {
+    "name": "Majority voting (MAJ)",
+    "plain": "Output the label that most constituent models predict.",
+    "formal": "MAJ(Y1..YS) = argmax_{y in {0,1}} n_y, where n_y = |{i in [S]: Yi = y}|"
+   },
+   {
+    "name": "Sensitive group (toxic-text setup of Baldini et al. 2022)",
+    "plain": "A text belongs to the sensitive group if it contains at least one term related to a sensitive topic (religion or race), and to the complementary group otherwise. Coarse-grained groups are used, e.g. 'mentions any religion'.",
+    "formal": "A = 1 if the text mentions the sensitive topic, else 0"
+   },
+   {
+    "name": "Equalized odds",
+    "plain": "Given the true label, the prediction should not depend on the sensitive attribute, i.e. both groups have equal true-positive and false-positive rates.",
+    "formal": "Pr(Y_hat=1 | A=0, Y=y) = Pr(Y_hat=1 | A=1, Y=y) for y in {0,1}"
+   },
+   {
+    "name": "EO metric (scalar)",
+    "plain": "A single number for how far the predictor is from equalized odds; lower is better. The text does not say exactly how the TPR and FPR gaps are combined (e.g. max or average).",
+    "formal": "unclear from text; some combination of |TPR_0 - TPR_1| and |FPR_0 - FPR_1|"
+   },
+   {
+    "name": "Derived predictor / HPS post-processing",
+    "plain": "A new, possibly randomized, predictor Y_tilde that sees only the original prediction Y_hat and the attribute A. It is chosen to satisfy equalized odds with minimum expected loss.",
+    "formal": "min_{p_ya} E[l(Y_tilde, Y)] s.t. Pr(Y_tilde=1|A=0,Y=y) = Pr(Y_tilde=1|A=1,Y=y) for y=0,1; 0<=p_ya<=1; p_ya = Pr(Y_tilde=1 | Y_hat=y, A=a). An LP in 4 variables."
+   },
+   {
+    "name": "Ensemble post-processing LP",
+    "plain": "HPS generalized so that the derived predictor sees the whole vector of S constituent predictions, with one flip probability per (prediction pattern, group) pair.",
+    "formal": "min_{p_(ybar,a)} E[l(Y_tilde,Y)] s.t. equal TPR and FPR across A; 0<=p_(ybar,a)<=1; p_(ybar,a) = Pr(Y_tilde=1 | Y1=ybar1,...,YS=ybarS, A=a), ybar in {0,1}^S"
+   }
+  ],
+  "theory": [
+   {
+    "name": "Proposition 1 (ensemble post-processing is an optimal-fair LP)",
+    "statement_plain": "The ensemble post-processing problem (Eq. 4) is a linear program in 2^(S+1) variables p_(ybar,a). Its coefficients can be computed from the joint distribution of (Y1_hat..YS_hat, A, Y), and its solution is an optimal equalized-odds predictor derived from Y1_hat..YS_hat and A, i.e. it has minimum expected loss among all derived predictors satisfying EO.",
+    "assumptions": "Binary labels Y, binary sensitive attribute A and binary constituent predictions. The derived predictor may depend only on (Y1_hat..YS_hat, A) and may be randomized. The joint distribution of (Y1_hat..YS_hat, A, Y) is known; in practice it is estimated from data, and the paper does not say which split. The loss is defined on label pairs, and the proof expands it as misclassification probabilities. Optimality is with respect to that distribution only, so there is no finite-sample or generalization guarantee.",
+    "significance": "It generalizes Hardt et al. (2016): S = 1 recovers the 4-variable HPS LP. Inference from the definitions (not stated in the paper): HPS(MAJ(...)) is itself an EO-satisfying derived predictor of (Y1..YS, A), so ensemble post-processing is never worse in expected loss than Aggregate-then-Post-process on the fitting distribution. Post-process-then-Aggregate need not satisfy EO exactly, because a majority of EO predictors is not necessarily EO, so it falls outside the guarantee. The proof (App. B) writes the objective and the TPR/FPR constraints as sums of p_(ybar,a) times probabilities of the joint distribution."
+   },
+   {
+    "name": "HPS LP (Hardt, Price, Srebro 2016; prior result used)",
+    "statement_plain": "For a single binary predictor and a binary attribute, the loss-minimizing equalized-odds derived predictor is the solution of an LP in the 4 variables p_ya.",
+    "assumptions": "Binary Y_hat, A, Y; known joint distribution; the derived predictor depends only on (Y_hat, A).",
+    "significance": "This is the building block for all three FairSISA variants."
+   }
+  ],
+  "complexity": "Not measured in the paper; no timing results are reported. Structurally, SISA trains S constituent models on about N/S samples each, and unlearning retrains only the affected constituent (from the pretrained initialization, since slicing is dropped). Inference needs S forward passes. The authors drop slicing because per-slice LLM checkpoints are too costly to store. Post-processing costs: Aggregate-then-Post-process solves one 4-variable LP; Post-process-then-Aggregate solves S independent 4-variable LPs; Ensemble Post-processing solves one LP with 2^(S+1) variables (256 for S = 7), which grows exponentially in S, and its estimated joint distribution over 2^S prediction patterns per group becomes sparse as S grows. All three are negligible next to LLM retraining.",
+  "experiments": {
+   "datasets": [
+    "HateXplain: about 20K Twitter and Gab posts. Offensive and hate are merged into one 'toxic' class against normal (binary). Sensitive attributes are religion and race at the coarse-grained level (e.g. 'any religion'); gender annotations exist but are not used."
+   ],
+   "models": [
+    "BERT",
+    "DistilGPT2",
+    "GPT2 (in the appendix). All are Hugging Face sequence classifiers; model sizes are not stated."
+   ],
+   "baselines": [
+    "Single model, S = 1 (conventional fine-tuning)",
+    "Unmitigated SISA with S = 3, 5, 7 (majority vote)",
+    "The three post-processing variants compared against each other: Aggregate-then-Post-process, Post-process-then-Aggregate, Ensemble Post-process"
+   ],
+   "metrics": [
+    "Accuracy (higher is better)",
+    "Equalized odds (EO) gap (lower is better)"
+   ],
+   "headline_results": [
+    "Values below are approximate readings from scatter plots; the paper gives no numeric tables. Results are averaged over 5 seeds, with no error bars shown.",
+    "Accuracy falls as S grows. BERT: about 0.79 (S=1), 0.78 (S=3), 0.775 (S=5), 0.76 (S=7). DistilGPT2: about 0.755, 0.748, 0.717, 0.712.",
+    "EO is non-monotone in S and sometimes worse than a single model. BERT/Religion: about 0.195 at S=1 vs 0.20 at S=3 and 0.205 at S=5, but 0.175 at S=7. DistilGPT2/Race: about 0.12 at S=1 vs 0.15 at S=3 and 0.14 at S=5. DistilGPT2/Religion: about 0.20 at S=1 vs 0.23 at S=3.",
+    "Post-processing, BERT/Religion, S=3 (accuracy / EO): SISA about 0.78 / 0.20; Post-process-then-Aggregate about 0.75 / 0.02; Ensemble about 0.757 / 0.045; Aggregate-then-Post-process about 0.734 / 0.055.",
+    "Post-processing, DistilGPT2/Religion, S=3 (accuracy / EO): SISA about 0.747 / 0.23; Post-process-then-Aggregate about 0.728 / 0.03; Ensemble about 0.715 / 0.09; Aggregate-then-Post-process about 0.717 / 0.12.",
+    "Overall, Post-process-then-Aggregate usually gives the best accuracy-EO trade-off, Aggregate-then-Post-process the worst, and Ensemble Post-process the highest accuracy at moderate EO.",
+    "One balanced ('fair') shard with the others skewed (BERT/Religion): unmitigated SISA EO is about 0.29 (S=3) and 0.36 (S=5), far above random splitting. Ensemble post-processing gets about 0.763 accuracy / 0.035 EO (S=3) and about 0.745 / 0.09 (S=5), the highest accuracy among the post-processors. Post-process-then-Aggregate gets about 0.725 / 0.03 (S=3); Aggregate-then-Post-process about 0.70 / 0.027 (S=3).",
+    "Inconsistency in the GPT2 appendix: Fig. 3(a) shows SISA accuracies of about 0.42-0.50, but Fig. 4(b) shows the same EO points at about 0.735-0.74 accuracy. Fig. 3(b) Race EO values (about 0.10-0.115) also do not match Fig. 4(c) (about 0.13-0.21)."
+   ]
+  },
+  "limitations": [
+   "No unlearning requests are actually run. Fairness is measured only for SISA-trained ensembles, never tracked after deletions, and unlearning time is not measured.",
+   "The paper gives no causal explanation of why SISA hurts fairness. It only shows empirically that EO varies non-monotonically with S. Plausible mechanisms are fewer minority-group samples per shard and majority-vote amplification of group-specific errors; these are not analysed.",
+   "The models are small by today's standard (BERT, DistilGPT2, GPT2) despite the 'LLM' framing. There is one dataset, one binary task, two binary sensitive attributes, and only the majority-vote aggregator.",
+   "Slicing is dropped, so each unlearning request retrains a whole constituent model.",
+   "Post-processing needs the sensitive attribute at inference time and produces randomized predictions.",
+   "The post-processor is fitted on data (the split is unclear). After a deletion it must be refit, and whether its fitting data must itself be unlearned is not discussed.",
+   "The ensemble LP has 2^(S+1) variables, exponential in S, and estimating the joint distribution gets sparse as S grows. Optimality holds only on the fitting distribution, which may explain why the 'optimal' method does not dominate empirically.",
+   "Results are reported only as scatter plots without error bars or tables. Some figure inconsistencies remain (the GPT2 Fig. 3 vs Fig. 4 mismatch; the text cites Fig. 1(c) for DistilGPT2/Race, which is actually the legend)."
+  ],
+  "future_work": [
+   "Not explicitly stated (workshop paper). Implied directions: study the fairness of other unlearning methods for LLMs; apply the ensemble post-processing result outside SISA (the authors say it is 'of independent interest'); handle shards made unfair by unlearning-likelihood-aware data placement."
+  ],
+  "relevance_to_efficient_unlearning": "This paper is a cautionary companion to SISA: the speed-up from sharding is not free, because more shards lower accuracy and can worsen group fairness (EO). Post-processing is a near-zero-cost repair that leaves the trained constituents untouched, which makes it a good fit for unlearning pipelines. Post-process-then-Aggregate is the most modular choice: after a shard is retrained, only that shard's 4-variable LP needs refitting. Ensemble post-processing needs a global LP whose size grows exponentially in S. The LP formulation over ensemble outputs, with linear TPR/FPR constraints, is a reusable tool. The 'one fair shard' experiment warns that efficiency-driven shard placement (e.g. grouping data that is likely to be deleted) can produce much less fair ensembles.",
+  "open_questions": [
+   "Track fairness (EO) over a stream of real deletion requests in SISA, and design incremental or warm-started post-processor updates so fairness is restored without refitting from scratch.",
+   "Make the fairness post-processor itself exactly unlearnable: if its LP coefficients are estimated from data that later gets deleted, how should they be updated, and is the result still exact unlearning?",
+   "Reduce the ensemble LP from 2^(S+1) to 2(S+1) variables by conditioning only on the vote count (a symmetric derived predictor). How much optimality is lost, and does it scale to large S?",
+   "Fairness-aware sharding: stratify shards by (sensitive attribute, label) to bound per-shard EO while keeping deletion cost low, and analyse the conflict with unlearning-likelihood-aware placement.",
+   "Restore slicing for LLMs by storing per-slice LoRA/adapter deltas instead of full checkpoints, then re-evaluate the fairness-efficiency trade-off.",
+   "Prove bounds relating shard size, group proportions and the EO of a majority-vote ensemble, to explain the non-monotone EO-vs-S behaviour."
+  ]
+ },
+ "nodes": [
+  {
+   "id": "machine-unlearning",
+   "label": "Machine Unlearning",
+   "type": "topic",
+   "description": "Removing the influence of specific training samples from a trained model while preserving its utility, ideally without full retraining.",
+   "aliases": [
+    "data deletion",
+    "unlearning"
+   ]
+  },
+  {
+   "id": "exact-unlearning",
+   "label": "Exact Unlearning",
+   "type": "topic",
+   "description": "Unlearning whose output model is distributed identically to a model retrained from scratch on the retained data.",
+   "aliases": []
+  },
+  {
+   "id": "approximate-unlearning",
+   "label": "Approximate Unlearning",
+   "type": "topic",
+   "description": "Unlearning whose output is only statistically close to retraining, typically quantified by differential-privacy-like indistinguishability.",
+   "aliases": []
+  },
+  {
+   "id": "certified-unlearning",
+   "label": "Certified Unlearning",
+   "type": "topic",
+   "description": "Unlearning with a formal, provable bound on how distinguishable the unlearned model is from a retrained one.",
+   "aliases": [
+    "certified data removal"
+   ]
+  },
+  {
+   "id": "right-to-be-forgotten",
+   "label": "Right to be Forgotten",
+   "type": "topic",
+   "description": "Legal right (e.g. GDPR, CCPA, PIPEDA) of individuals to have their personal data erased, including from trained models.",
+   "aliases": [
+    "GDPR erasure"
+   ]
+  },
+  {
+   "id": "fairness",
+   "label": "Fairness",
+   "type": "topic",
+   "description": "The study and enforcement of non-discriminatory behaviour of ML models with respect to individuals or groups.",
+   "aliases": [
+    "AI fairness",
+    "algorithmic fairness"
+   ]
+  },
+  {
+   "id": "group-fairness",
+   "label": "Group Fairness",
+   "type": "topic",
+   "description": "Fairness notions requiring statistical parity of some model quantity (e.g. error rates, positive rates) across groups defined by a sensitive attribute.",
+   "aliases": []
+  },
+  {
+   "id": "large-language-models",
+   "label": "Large Language Models",
+   "type": "topic",
+   "description": "Transformer-based language models pre-trained on massive text corpora and adapted to downstream tasks.",
+   "aliases": [
+    "LLMs"
+   ]
+  },
+  {
+   "id": "ensemble-learning",
+   "label": "Ensemble Learning",
+   "type": "topic",
+   "description": "Combining predictions of multiple models to obtain a single, usually more robust, prediction.",
+   "aliases": [
+    "ensemble methods"
+   ]
+  },
+  {
+   "id": "toxic-text-classification",
+   "label": "Toxic Text Classification",
+   "type": "topic",
+   "description": "Classifying text as toxic (hateful/offensive) or normal; a common benchmark task for language model bias.",
+   "aliases": [
+    "hate speech detection"
+   ]
+  },
+  {
+   "id": "bias-mitigation",
+   "label": "Bias Mitigation",
+   "type": "topic",
+   "description": "Techniques for reducing unfair model behaviour, grouped into pre-processing, in-processing and post-processing families.",
+   "aliases": [
+    "debiasing"
+   ]
+  },
+  {
+   "id": "fair-machine-unlearning",
+   "label": "Fairness of Machine Unlearning",
+   "type": "topic",
+   "description": "Research area studying how unlearning interacts with fairness, including fairness degradation caused by unlearning and fair unlearning algorithms.",
+   "aliases": [
+    "fair unlearning",
+    "unlearning-fairness interplay"
+   ]
+  },
+  {
+   "id": "sensitive-attribute",
+   "label": "Sensitive Attribute",
+   "type": "topic",
+   "description": "A protected characteristic (e.g. race, religion, gender) used to define groups for fairness evaluation.",
+   "aliases": [
+    "protected attribute"
+   ]
+  },
+  {
+   "id": "sisa",
+   "label": "SISA (Sharded, Isolated, Sliced, Aggregated)",
+   "type": "method",
+   "description": "Exact unlearning framework that trains isolated constituent models on disjoint data shards (with slice checkpoints) and aggregates their predictions, so deletion retrains only the affected shard.",
+   "aliases": [
+    "SISA training"
+   ]
+  },
+  {
+   "id": "data-sharding",
+   "label": "Data Sharding",
+   "type": "method",
+   "description": "Partitioning a training set into disjoint subsets that are processed by separate models.",
+   "aliases": [
+    "sharding"
+   ]
+  },
+  {
+   "id": "data-slicing",
+   "label": "Data Slicing",
+   "type": "method",
+   "description": "Further splitting a shard into ordered slices trained incrementally, with checkpoints after each slice, so retraining can resume mid-shard.",
+   "aliases": [
+    "slicing"
+   ]
+  },
+  {
+   "id": "checkpointing",
+   "label": "Checkpointing",
+   "type": "method",
+   "description": "Saving model parameters at intermediate training points so training can resume from them later.",
+   "aliases": []
+  },
+  {
+   "id": "model-ensembling",
+   "label": "Model Ensembling",
+   "type": "method",
+   "description": "Training several models and combining their outputs at inference time.",
+   "aliases": [
+    "ensembling"
+   ]
+  },
+  {
+   "id": "majority-voting",
+   "label": "Majority Voting",
+   "type": "method",
+   "description": "Aggregation rule that outputs the label predicted by the largest number of ensemble members.",
+   "aliases": [
+    "MAJ",
+    "plurality vote"
+   ]
+  },
+  {
+   "id": "retrain-from-scratch",
+   "label": "Retrain from Scratch",
+   "type": "method",
+   "description": "Naive exact unlearning: retrain the model on the dataset with the deleted samples removed.",
+   "aliases": [
+    "naive retraining"
+   ]
+  },
+  {
+   "id": "post-processing-fairness",
+   "label": "Post-Processing for Fairness",
+   "type": "method",
+   "description": "Bias mitigation that only modifies a trained model's outputs (e.g. group-dependent thresholds or randomized flips), without changing training data or training.",
+   "aliases": [
+    "post-processing bias mitigation"
+   ]
+  },
+  {
+   "id": "pre-processing-bias-mitigation",
+   "label": "Pre-Processing Bias Mitigation",
+   "type": "method",
+   "description": "Bias mitigation that transforms or reweights the training data before model training.",
+   "aliases": []
+  },
+  {
+   "id": "in-processing-bias-mitigation",
+   "label": "In-Processing Bias Mitigation",
+   "type": "method",
+   "description": "Bias mitigation that changes the training objective or procedure (e.g. fairness regularizers, adversarial debiasing).",
+   "aliases": []
+  },
+  {
+   "id": "hps-equalized-odds-postprocessing",
+   "label": "HPS Equalized-Odds Post-Processing (Hardt et al. 2016)",
+   "type": "method",
+   "description": "Constructs a randomized derived predictor from a classifier's output and the sensitive attribute by solving a small linear program that minimizes loss subject to equalized odds.",
+   "aliases": [
+    "HPS",
+    "Hardt-Price-Srebro post-processing",
+    "equalized odds post-processing"
+   ]
+  },
+  {
+   "id": "fairsisa",
+   "label": "FairSISA",
+   "type": "method",
+   "description": "Post-processing framework that improves the equalized-odds fairness of SISA ensembles via three ways of applying HPS-style derived predictors to ensemble outputs.",
+   "aliases": [
+    "FairSISA framework"
+   ]
+  },
+  {
+   "id": "aggregate-then-post-process",
+   "label": "Aggregate-then-Post-process",
+   "type": "method",
+   "description": "Ensemble fairness strategy that first aggregates member predictions (majority vote) and then applies a single fairness post-processor to the aggregate.",
+   "aliases": [
+    "HPS(MAJ(...))",
+    "Aggregate-then-Process"
+   ]
+  },
+  {
+   "id": "post-process-then-aggregate",
+   "label": "Post-process-then-Aggregate",
+   "type": "method",
+   "description": "Ensemble fairness strategy that applies a fairness post-processor to each member's predictions separately and then aggregates the corrected predictions.",
+   "aliases": [
+    "MAJ(HPS(...))",
+    "Process-then-Aggregate"
+   ]
+  },
+  {
+   "id": "ensemble-post-processing",
+   "label": "Ensemble Post-Processing",
+   "type": "method",
+   "description": "Fairness post-processing whose derived predictor conditions on the full vector of ensemble member predictions plus the sensitive attribute, aggregating and debiasing in one linear program.",
+   "aliases": [
+    "EnsembleProcess",
+    "ensemble HPS LP"
+   ]
+  },
+  {
+   "id": "linear-programming",
+   "label": "Linear Programming",
+   "type": "method",
+   "description": "Optimization of a linear objective under linear equality/inequality constraints; solvable in polynomial time.",
+   "aliases": [
+    "LP"
+   ]
+  },
+  {
+   "id": "supervised-fine-tuning",
+   "label": "Supervised Fine-Tuning",
+   "type": "method",
+   "description": "Adapting a pretrained model to a labeled downstream task by continued gradient-based training.",
+   "aliases": [
+    "fine-tuning",
+    "sequence classification fine-tuning"
+   ]
+  },
+  {
+   "id": "fair-shard-construction",
+   "label": "Balanced (Fair) Shard Construction",
+   "type": "method",
+   "description": "Building a data shard with equal numbers of samples for every (sensitive attribute, label) combination.",
+   "aliases": [
+    "fair shard",
+    "stratified shard"
+   ]
+  },
+  {
+   "id": "distribution-aware-sharding",
+   "label": "Unlearning-Likelihood-Aware Sharding",
+   "type": "method",
+   "description": "Placing data samples into shards according to their estimated probability of a deletion request, so that frequently deleted data is concentrated in a few shards.",
+   "aliases": [
+    "distribution-aware sharding"
+   ]
+  },
+  {
+   "id": "provably-fair-unlearning",
+   "label": "Provably Fair Unlearning (Oesterling et al. 2023)",
+   "type": "method",
+   "description": "Unlearning method with formal fairness guarantees during data removal, limited to convex models.",
+   "aliases": [
+    "fair machine unlearning"
+   ]
+  },
+  {
+   "id": "unfairness",
+   "label": "Unfairness",
+   "type": "problem",
+   "description": "Systematically different model behaviour or error rates across groups defined by a sensitive attribute.",
+   "aliases": [
+    "model bias",
+    "algorithmic bias"
+   ]
+  },
+  {
+   "id": "unlearning-induced-unfairness",
+   "label": "Unlearning-Induced Unfairness",
+   "type": "problem",
+   "description": "Degradation of group fairness caused by an unlearning method or unlearning-friendly training procedure.",
+   "aliases": [
+    "fairness degradation from unlearning"
+   ]
+  },
+  {
+   "id": "utility-degradation",
+   "label": "Utility Degradation",
+   "type": "problem",
+   "description": "Loss of model accuracy or usefulness caused by a modification such as unlearning or sharded training.",
+   "aliases": [
+    "accuracy drop"
+   ]
+  },
+  {
+   "id": "unlearning-cost",
+   "label": "Unlearning Cost",
+   "type": "problem",
+   "description": "Computational expense of removing data from a model, prohibitive when the naive approach is full retraining.",
+   "aliases": [
+    "retraining cost"
+   ]
+  },
+  {
+   "id": "accuracy-fairness-tradeoff",
+   "label": "Accuracy-Fairness Trade-off",
+   "type": "problem",
+   "description": "Tension where enforcing a fairness constraint typically lowers predictive accuracy.",
+   "aliases": [
+    "performance-fairness trade-off"
+   ]
+  },
+  {
+   "id": "checkpoint-storage-cost",
+   "label": "Checkpoint Storage Cost",
+   "type": "problem",
+   "description": "Storage burden of saving many intermediate model checkpoints, severe for very large models.",
+   "aliases": []
+  },
+  {
+   "id": "minority-class-degradation",
+   "label": "Minority-Class Degradation",
+   "type": "problem",
+   "description": "Disproportionate performance loss on under-represented classes or groups, e.g. when training on small data partitions.",
+   "aliases": []
+  },
+  {
+   "id": "undesirable-training-data",
+   "label": "Undesirable Training Data",
+   "type": "problem",
+   "description": "Sensitive or harmful data (PII, copyrighted text, toxic content, poisoned samples) unintentionally ingested into large training corpora.",
+   "aliases": [
+    "data contamination"
+   ]
+  },
+  {
+   "id": "derived-predictor",
+   "label": "Derived Predictor",
+   "type": "theory",
+   "description": "A (possibly randomized) predictor that depends only on an existing predictor's output and the sensitive attribute, not on raw features.",
+   "aliases": []
+  },
+  {
+   "id": "optimal-fair-predictor",
+   "label": "Optimal Fair (Equalized-Odds) Predictor",
+   "type": "theory",
+   "description": "The predictor with minimum expected loss within a given class subject to a fairness constraint such as equalized odds.",
+   "aliases": [
+    "optimal equalized odds predictor"
+   ]
+  },
+  {
+   "id": "proposition-1-ensemble-eo-lp",
+   "label": "Proposition 1: Ensemble EO Post-Processing is an Optimal LP",
+   "type": "theory",
+   "description": "Result that equalized-odds post-processing over S binary ensemble outputs is a linear program in 2^(S+1) variables whose solution is the optimal equalized-odds derived predictor.",
+   "aliases": [
+    "FairSISA Proposition 1"
+   ]
+  },
+  {
+   "id": "unlearning-guarantee",
+   "label": "Unlearning Guarantee",
+   "type": "theory",
+   "description": "Formal statement of what unlearning ensures, e.g. distributional equality (exact) or indistinguishability (approximate) between the unlearned and retrained models.",
+   "aliases": []
+  },
+  {
+   "id": "accuracy",
+   "label": "Accuracy",
+   "type": "metric",
+   "description": "Fraction of correctly classified test samples.",
+   "aliases": []
+  },
+  {
+   "id": "equalized-odds",
+   "label": "Equalized Odds",
+   "type": "metric",
+   "description": "Group fairness criterion/metric requiring equal true-positive and false-positive rates across sensitive groups; reported as the size of the rate gaps.",
+   "aliases": [
+    "EO"
+   ]
+  },
+  {
+   "id": "demographic-parity",
+   "label": "Demographic Parity",
+   "type": "metric",
+   "description": "Group fairness criterion requiring equal positive-prediction rates across sensitive groups.",
+   "aliases": [
+    "statistical parity"
+   ]
+  },
+  {
+   "id": "true-positive-rate",
+   "label": "True Positive Rate",
+   "type": "metric",
+   "description": "Probability of predicting positive given the true label is positive.",
+   "aliases": [
+    "TPR",
+    "recall"
+   ]
+  },
+  {
+   "id": "false-positive-rate",
+   "label": "False Positive Rate",
+   "type": "metric",
+   "description": "Probability of predicting positive given the true label is negative.",
+   "aliases": [
+    "FPR"
+   ]
+  },
+  {
+   "id": "hatexplain",
+   "label": "HateXplain",
+   "type": "dataset",
+   "description": "Benchmark hate-speech dataset of about 20K Twitter and Gab posts with hate/offensive/normal labels, rationales, and target-community annotations (religion, race, gender).",
+   "aliases": []
+  },
+  {
+   "id": "llm",
+   "label": "LLM (model)",
+   "type": "model",
+   "description": "A large transformer language model used as a trainable architecture.",
+   "aliases": [
+    "language model"
+   ]
+  },
+  {
+   "id": "bert",
+   "label": "BERT",
+   "type": "model",
+   "description": "Bidirectional transformer encoder pre-trained with masked language modelling, widely fine-tuned for classification.",
+   "aliases": []
+  },
+  {
+   "id": "gpt-2",
+   "label": "GPT-2",
+   "type": "model",
+   "description": "OpenAI's autoregressive transformer decoder language model (2019).",
+   "aliases": [
+    "GPT2"
+   ]
+  },
+  {
+   "id": "distilgpt2",
+   "label": "DistilGPT2",
+   "type": "model",
+   "description": "A smaller GPT-2 obtained by knowledge distillation, faster with somewhat lower quality.",
+   "aliases": []
+  }
+ ],
+ "edges": [
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "fairsisa",
+   "relation": "proposes",
+   "note": "Introduces FairSISA as a post-processing framework for SISA ensembles.",
+   "evidence": "Abstract: 'our post-processing framework called FairSISA'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "aggregate-then-post-process",
+   "relation": "proposes",
+   "note": "First of three variants: majority vote, then a single HPS post-processor.",
+   "evidence": "Sec. 3, HPS(MAJ(Y1,...,YS))"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "post-process-then-aggregate",
+   "relation": "proposes",
+   "note": "Second variant: HPS on each constituent, then majority vote.",
+   "evidence": "Sec. 3, MAJ(HPS(Y1),...,HPS(YS))"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "ensemble-post-processing",
+   "relation": "proposes",
+   "note": "Third variant: a new LP over the joint vector of constituent predictions.",
+   "evidence": "Sec. 3, Eq. 4"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "proposition-1-ensemble-eo-lp",
+   "relation": "proves",
+   "note": "Proves that the ensemble LP has 2^(S+1) variables and yields the optimal EO derived predictor.",
+   "evidence": "Proposition 1; proof in App. B"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "sisa",
+   "relation": "builds_on",
+   "note": "Studies and post-processes ensembles produced by SISA, without slicing.",
+   "evidence": "Sec. 1: 'we evaluate the fairness of LLMs trained using ... SISA'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "hps-equalized-odds-postprocessing",
+   "relation": "builds_on",
+   "note": "All three methods adapt the Hardt et al. derived-predictor LP.",
+   "evidence": "Sec. 2, 'We denote the method as HPS'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "unlearning-induced-unfairness",
+   "relation": "addresses",
+   "note": "Shows empirically that SISA can reduce fairness in LMs and proposes a fix.",
+   "evidence": "Sec. 4: 'SISA framework can indeed degrade the fairness'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "accuracy-fairness-tradeoff",
+   "relation": "addresses",
+   "note": "Evaluates the accuracy-EO trade-off of SISA and of each post-processor.",
+   "evidence": "Figs. 1, 2: accuracy vs equalized odds"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "fair-machine-unlearning",
+   "relation": "addresses",
+   "note": "Claims to be the first study of the unlearning-fairness interplay for LLMs.",
+   "evidence": "Sec. 1: 'first work to explore the effects of unlearning on the fairness of LLMs'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "hatexplain",
+   "relation": "evaluates_on",
+   "note": "Sole dataset: binary toxic vs normal, with religion and race as sensitive attributes.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "toxic-text-classification",
+   "relation": "uses",
+   "note": "The fairness study is framed on toxic text classification following Baldini et al. (2022).",
+   "evidence": "Sec. 2, 'Fairness for Toxic Text Classification'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "bert",
+   "relation": "uses",
+   "note": "One of the three fine-tuned LMs and a main-paper model.",
+   "evidence": "Sec. 4, Figs. 1-2"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "distilgpt2",
+   "relation": "uses",
+   "note": "One of the three fine-tuned LMs and a main-paper model.",
+   "evidence": "Sec. 4, Figs. 1-2"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "gpt-2",
+   "relation": "uses",
+   "note": "Evaluated in the appendix, with trends similar to BERT and DistilGPT2.",
+   "evidence": "App. C.2, Figs. 3-4"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "equalized-odds",
+   "relation": "measures_with",
+   "note": "The only fairness metric; lower EO is better.",
+   "evidence": "Sec. 2, Eq. 1"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "accuracy",
+   "relation": "measures_with",
+   "note": "Utility metric plotted against EO.",
+   "evidence": "Fig. 1 y-axis"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "right-to-be-forgotten",
+   "relation": "motivated_by",
+   "note": "User deletion requests under GDPR, CCPA and PIPEDA motivate unlearning for LMs.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "undesirable-training-data",
+   "relation": "motivated_by",
+   "note": "PII, copyrighted or toxic text ingested during pre-training motivates unlearning.",
+   "evidence": "Sec. 1, citing Carlini et al."
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "unlearning-cost",
+   "relation": "motivated_by",
+   "note": "Retraining LLMs is infeasible, so they use SISA and avoid retraining for the fairness fix.",
+   "evidence": "Sec. 1: 'retraining ... LLMs, from scratch is infeasible'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "demographic-parity",
+   "relation": "contrasts_with",
+   "note": "Mentioned as an alternative group-fairness notion but not used.",
+   "evidence": "Sec. 2: 'e.g., demographic parity ... we consider ... equalized odds'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "pre-processing-bias-mitigation",
+   "relation": "contrasts_with",
+   "note": "Rejected because it would require modifying the data and retraining costly LLMs.",
+   "evidence": "Sec. 1, App. A"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "in-processing-bias-mitigation",
+   "relation": "contrasts_with",
+   "note": "Rejected because it changes training procedures; post-processing avoids retraining.",
+   "evidence": "Sec. 1, App. A"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "supervised-fine-tuning",
+   "relation": "compares_against",
+   "note": "The S = 1 single fine-tuned model is the conventional baseline for SISA's accuracy and EO.",
+   "evidence": "Sec. 4: 'S = 1 shard corresponds to the conventional single model fine-tuning'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "fair-shard-construction",
+   "relation": "uses",
+   "note": "Builds one balanced shard to simulate unequal shards and stress-test the post-processors.",
+   "evidence": "App. C.3 'One Fair Shard'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "certified-unlearning",
+   "relation": "contrasts_with",
+   "note": "Picks SISA because many certified methods (Sekhari, Warnecke) do not apply to language models.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "provably-fair-unlearning",
+   "relation": "contrasts_with",
+   "note": "Oesterling et al.'s provably fair unlearning is limited to convex models, unlike LLMs.",
+   "evidence": "App. A: 'restricted to convex functions'"
+  },
+  {
+   "source": "kadhe2023-fairsisa",
+   "target": "minority-class-degradation",
+   "relation": "motivated_by",
+   "note": "Cites Koch and Soll (2023), who show SISA hurts minority classes, as related evidence.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "aggregate-then-post-process",
+   "target": "fairsisa",
+   "relation": "part_of",
+   "note": "One of FairSISA's three variants.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "post-process-then-aggregate",
+   "target": "fairsisa",
+   "relation": "part_of",
+   "note": "One of FairSISA's three variants.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "ensemble-post-processing",
+   "target": "fairsisa",
+   "relation": "part_of",
+   "note": "One of FairSISA's three variants and the one with an optimality guarantee.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "fairsisa",
+   "target": "sisa",
+   "relation": "extends",
+   "note": "Adds an inference-time fairness layer on top of SISA's constituent predictions.",
+   "evidence": "Sec. 3 title"
+  },
+  {
+   "source": "fairsisa",
+   "target": "post-processing-fairness",
+   "relation": "is_a",
+   "note": "Modifies only model outputs, not the data or training.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "fairsisa",
+   "target": "unlearning-induced-unfairness",
+   "relation": "mitigates",
+   "note": "All three variants cut SISA's EO substantially, e.g. BERT/Religion S=3 from about 0.20 to about 0.02-0.055.",
+   "evidence": "Fig. 2(b)"
+  },
+  {
+   "source": "fairsisa",
+   "target": "sensitive-attribute",
+   "relation": "uses",
+   "note": "The derived predictors condition on A at inference time.",
+   "evidence": "Sec. 2-3, p_ya and p_(ybar,a)"
+  },
+  {
+   "source": "aggregate-then-post-process",
+   "target": "majority-voting",
+   "relation": "uses",
+   "note": "Aggregates constituent predictions by MAJ before post-processing.",
+   "evidence": "Eq. 3"
+  },
+  {
+   "source": "aggregate-then-post-process",
+   "target": "hps-equalized-odds-postprocessing",
+   "relation": "uses",
+   "note": "Applies one 4-variable HPS LP to the majority-vote output.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "post-process-then-aggregate",
+   "target": "hps-equalized-odds-postprocessing",
+   "relation": "uses",
+   "note": "Fits a separate HPS LP for each constituent model's predictions.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "post-process-then-aggregate",
+   "target": "majority-voting",
+   "relation": "uses",
+   "note": "Takes the majority vote of the S post-processed predictions.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "ensemble-post-processing",
+   "target": "hps-equalized-odds-postprocessing",
+   "relation": "extends",
+   "note": "Generalizes the HPS LP from one prediction to a vector of S predictions; S=1 recovers HPS.",
+   "evidence": "Sec. 3: 'we generalize the HPS optimization problem'"
+  },
+  {
+   "source": "ensemble-post-processing",
+   "target": "linear-programming",
+   "relation": "uses",
+   "note": "Solves one LP in 2^(S+1) variables p_(ybar,a).",
+   "evidence": "Proposition 1"
+  },
+  {
+   "source": "ensemble-post-processing",
+   "target": "majority-voting",
+   "relation": "contrasts_with",
+   "note": "Aggregates inherently through the LP instead of a fixed vote rule.",
+   "evidence": "Sec. 3: 'post-processing method that can inherently aggregate the predictions'"
+  },
+  {
+   "source": "ensemble-post-processing",
+   "target": "optimal-fair-predictor",
+   "relation": "enables",
+   "note": "Its LP solution is the loss-minimizing EO predictor derived from (Y1..YS, A).",
+   "evidence": "Proposition 1"
+  },
+  {
+   "source": "ensemble-post-processing",
+   "target": "accuracy-fairness-tradeoff",
+   "relation": "mitigates",
+   "note": "Highest accuracy at moderate EO; in the one-fair-shard setting, about 0.763 accuracy at about 0.035 EO (BERT, S=3).",
+   "evidence": "Sec. 4; App. C.3, Fig. 5"
+  },
+  {
+   "source": "post-process-then-aggregate",
+   "target": "accuracy-fairness-tradeoff",
+   "relation": "mitigates",
+   "note": "Generally the best accuracy-EO trade-off across models and attributes.",
+   "evidence": "Sec. 4: 'generally achieves the best trade-off'"
+  },
+  {
+   "source": "aggregate-then-post-process",
+   "target": "accuracy-fairness-tradeoff",
+   "relation": "suffers_from",
+   "note": "Generally the worst accuracy-EO trade-off of the three variants.",
+   "evidence": "Sec. 4: 'generally achieves the worst trade-off'"
+  },
+  {
+   "source": "post-process-then-aggregate",
+   "target": "ensemble-post-processing",
+   "relation": "contrasts_with",
+   "note": "Empirically the better trade-off, but not covered by the optimality theorem.",
+   "evidence": "Sec. 4, Fig. 2"
+  },
+  {
+   "source": "aggregate-then-post-process",
+   "target": "post-process-then-aggregate",
+   "relation": "contrasts_with",
+   "note": "Same building blocks in opposite order, giving the worst vs the best empirical trade-off.",
+   "evidence": "Sec. 3-4"
+  },
+  {
+   "source": "proposition-1-ensemble-eo-lp",
+   "target": "ensemble-post-processing",
+   "relation": "part_of",
+   "note": "The theoretical guarantee accompanying the ensemble post-processing method.",
+   "evidence": "Sec. 3, Proposition 1"
+  },
+  {
+   "source": "proposition-1-ensemble-eo-lp",
+   "target": "optimal-fair-predictor",
+   "relation": "proves",
+   "note": "Shows the LP solution is an optimal equalized-odds derived predictor.",
+   "evidence": "Proposition 1: 'its solution is an optimal equalized odds predictor'"
+  },
+  {
+   "source": "proposition-1-ensemble-eo-lp",
+   "target": "derived-predictor",
+   "relation": "builds_on",
+   "note": "Uses Hardt et al.'s derived-predictor definition; binary inputs make Y_tilde fully specified by 2^(S+1) probabilities.",
+   "evidence": "App. B"
+  },
+  {
+   "source": "proposition-1-ensemble-eo-lp",
+   "target": "linear-programming",
+   "relation": "uses",
+   "note": "Shows the objective and the TPR/FPR constraints are linear in p_(ybar,a).",
+   "evidence": "App. B, Eqs. 5-6"
+  },
+  {
+   "source": "proposition-1-ensemble-eo-lp",
+   "target": "true-positive-rate",
+   "relation": "uses",
+   "note": "The proof expands group TPR as a linear combination of p_(ybar,a) weighted by joint probabilities.",
+   "evidence": "App. B, Eq. 6"
+  },
+  {
+   "source": "hps-equalized-odds-postprocessing",
+   "target": "post-processing-fairness",
+   "relation": "is_a",
+   "note": "The canonical post-processing method for equalized odds.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "hps-equalized-odds-postprocessing",
+   "target": "linear-programming",
+   "relation": "uses",
+   "note": "An LP in four variables p_ya.",
+   "evidence": "Sec. 2: 'a linear program in four variables'"
+  },
+  {
+   "source": "hps-equalized-odds-postprocessing",
+   "target": "derived-predictor",
+   "relation": "uses",
+   "note": "Outputs a derived predictor Y_tilde that depends only on (Y_hat, A).",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "hps-equalized-odds-postprocessing",
+   "target": "equalized-odds",
+   "relation": "uses",
+   "note": "Enforces equal TPR and FPR across groups as LP constraints.",
+   "evidence": "Eq. 2"
+  },
+  {
+   "source": "hps-equalized-odds-postprocessing",
+   "target": "sensitive-attribute",
+   "relation": "uses",
+   "note": "Uses group-specific flip probabilities, so A is needed at inference.",
+   "evidence": "Sec. 2, p_ya"
+  },
+  {
+   "source": "optimal-fair-predictor",
+   "target": "equalized-odds",
+   "relation": "uses",
+   "note": "Optimality is minimum loss subject to the equalized-odds constraint.",
+   "evidence": "Eq. 4"
+  },
+  {
+   "source": "optimal-fair-predictor",
+   "target": "derived-predictor",
+   "relation": "builds_on",
+   "note": "Optimal within the class of derived predictors of the ensemble outputs and A.",
+   "evidence": "Proposition 1"
+  },
+  {
+   "source": "post-processing-fairness",
+   "target": "bias-mitigation",
+   "relation": "is_a",
+   "note": "One of three bias-mitigation families (pre-, in-, post-processing).",
+   "evidence": "App. A"
+  },
+  {
+   "source": "pre-processing-bias-mitigation",
+   "target": "bias-mitigation",
+   "relation": "is_a",
+   "note": "Bias-mitigation family that acts on the training data.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "in-processing-bias-mitigation",
+   "target": "bias-mitigation",
+   "relation": "is_a",
+   "note": "Bias-mitigation family that acts on the training procedure.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "post-processing-fairness",
+   "target": "unfairness",
+   "relation": "mitigates",
+   "note": "Reduces group bias by changing only outputs, with no LLM retraining.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "bias-mitigation",
+   "target": "fairness",
+   "relation": "part_of",
+   "note": "Bias mitigation is the intervention side of AI fairness research.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "equalized-odds",
+   "target": "group-fairness",
+   "relation": "is_a",
+   "note": "A group-fairness notion based on error rates conditioned on the true label.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "demographic-parity",
+   "target": "group-fairness",
+   "relation": "is_a",
+   "note": "Listed as another group-fairness notion.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "group-fairness",
+   "target": "fairness",
+   "relation": "is_a",
+   "note": "Group fairness is the fairness family used in this paper.",
+   "evidence": "Sec. 2, citing Chouldechova & Roth"
+  },
+  {
+   "source": "true-positive-rate",
+   "target": "equalized-odds",
+   "relation": "part_of",
+   "note": "EO requires equal TPR (y=1) across groups.",
+   "evidence": "Eq. 1"
+  },
+  {
+   "source": "false-positive-rate",
+   "target": "equalized-odds",
+   "relation": "part_of",
+   "note": "EO requires equal FPR (y=0) across groups.",
+   "evidence": "Eq. 1"
+  },
+  {
+   "source": "sensitive-attribute",
+   "target": "group-fairness",
+   "relation": "part_of",
+   "note": "Groups are defined by whether text mentions a sensitive topic (religion or race).",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "unlearning-induced-unfairness",
+   "target": "unfairness",
+   "relation": "is_a",
+   "note": "Unfairness specifically introduced by the unlearning-oriented SISA training.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "fair-machine-unlearning",
+   "target": "machine-unlearning",
+   "relation": "builds_on",
+   "note": "Studies fairness side effects of unlearning methods.",
+   "evidence": "App. A 'Fairness vs Machine Unlearning'"
+  },
+  {
+   "source": "fair-machine-unlearning",
+   "target": "fairness",
+   "relation": "builds_on",
+   "note": "Brings fairness criteria into unlearning evaluation.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "fair-machine-unlearning",
+   "target": "unlearning-induced-unfairness",
+   "relation": "addresses",
+   "note": "Prior work (Zhang et al. 2023) found that unlearning can increase disparity on tabular data.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "provably-fair-unlearning",
+   "target": "fair-machine-unlearning",
+   "relation": "is_a",
+   "note": "Cited as the first provably fair unlearning method.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "sisa",
+   "target": "unlearning-induced-unfairness",
+   "relation": "causes",
+   "note": "EO is non-monotone in S. For example, BERT/Religion with S=3 or 5 and DistilGPT2/Race with S=3 or 5 have higher EO than S=1. No mechanism is given.",
+   "evidence": "Sec. 4, Fig. 1"
+  },
+  {
+   "source": "sisa",
+   "target": "utility-degradation",
+   "relation": "causes",
+   "note": "Accuracy falls as shards increase (e.g. BERT about 0.79 to 0.76 from S=1 to 7), consistent with Bourtoule et al.",
+   "evidence": "Sec. 4, Fig. 1"
+  },
+  {
+   "source": "sisa",
+   "target": "minority-class-degradation",
+   "relation": "suffers_from",
+   "note": "Cited work shows SISA comes at the expense of minority classes on imbalanced data.",
+   "evidence": "App. A, Koch & Soll 2023"
+  },
+  {
+   "source": "sisa",
+   "target": "exact-unlearning",
+   "relation": "is_a",
+   "note": "Chosen because it is exact and architecture-agnostic.",
+   "evidence": "Sec. 1-2"
+  },
+  {
+   "source": "sisa",
+   "target": "unlearning-cost",
+   "relation": "mitigates",
+   "note": "Only the affected constituent is retrained on its smaller shard.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "sisa",
+   "target": "retrain-from-scratch",
+   "relation": "contrasts_with",
+   "note": "Gives significant speed-ups over retraining a single model.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "sisa",
+   "target": "supervised-fine-tuning",
+   "relation": "uses",
+   "note": "In this paper each constituent is a pretrained LM fine-tuned on its shard for S to S+2 epochs.",
+   "evidence": "App. C.1"
+  },
+  {
+   "source": "data-sharding",
+   "target": "sisa",
+   "relation": "part_of",
+   "note": "Data is randomly divided into S disjoint shards (S = 1, 3, 5, 7 here).",
+   "evidence": "Sec. 2, Sec. 4"
+  },
+  {
+   "source": "data-slicing",
+   "target": "sisa",
+   "relation": "part_of",
+   "note": "Part of the original SISA but disabled in this paper.",
+   "evidence": "Footnote 1"
+  },
+  {
+   "source": "checkpointing",
+   "target": "sisa",
+   "relation": "part_of",
+   "note": "SISA saves parameters after each slice to resume retraining.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "model-ensembling",
+   "target": "sisa",
+   "relation": "part_of",
+   "note": "SISA creates an ensemble of constituent models.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "majority-voting",
+   "target": "sisa",
+   "relation": "part_of",
+   "note": "SISA's default aggregation rule, used throughout this paper.",
+   "evidence": "Sec. 3, Eq. 3"
+  },
+  {
+   "source": "data-slicing",
+   "target": "checkpoint-storage-cost",
+   "relation": "suffers_from",
+   "note": "Slicing is dropped because per-slice LLM checkpoints have prohibitive storage cost.",
+   "evidence": "Footnote 1"
+  },
+  {
+   "source": "checkpointing",
+   "target": "checkpoint-storage-cost",
+   "relation": "causes",
+   "note": "Each saved LLM checkpoint is a full copy of a large model.",
+   "evidence": "Footnote 1"
+  },
+  {
+   "source": "model-ensembling",
+   "target": "ensemble-learning",
+   "relation": "is_a",
+   "note": "SISA aggregation is described as similar to ensemble methods (Dietterich 2000).",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "majority-voting",
+   "target": "ensemble-learning",
+   "relation": "part_of",
+   "note": "A standard ensemble aggregation rule.",
+   "evidence": "Eq. 3"
+  },
+  {
+   "source": "retrain-from-scratch",
+   "target": "exact-unlearning",
+   "relation": "is_a",
+   "note": "Listed as the basic exact unlearning approach.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "retrain-from-scratch",
+   "target": "unlearning-cost",
+   "relation": "suffers_from",
+   "note": "Infeasible for LLMs due to exorbitant compute.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "exact-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "One of two broad categories of unlearning.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "approximate-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "The other broad category of unlearning.",
+   "evidence": "App. A"
+  },
+  {
+   "source": "certified-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Unlearning with formal guarantees; many such methods do not fit LMs.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "exact-unlearning",
+   "target": "approximate-unlearning",
+   "relation": "contrasts_with",
+   "note": "Perfect vs stochastic indistinguishability from the retrained model.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "unlearning-guarantee",
+   "target": "exact-unlearning",
+   "relation": "part_of",
+   "note": "Exact unlearning means U(A(D),Du,Dr) has the same distribution as A(Dr).",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "machine-unlearning",
+   "target": "right-to-be-forgotten",
+   "relation": "motivated_by",
+   "note": "Privacy laws require removing user data on request.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "machine-unlearning",
+   "target": "undesirable-training-data",
+   "relation": "motivated_by",
+   "note": "Removing PII, copyrighted or toxic text absorbed during training.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "distribution-aware-sharding",
+   "target": "data-sharding",
+   "relation": "extends",
+   "note": "SISA can put data with high unlearning likelihood on designated shards.",
+   "evidence": "App. C.3"
+  },
+  {
+   "source": "distribution-aware-sharding",
+   "target": "unfairness",
+   "relation": "causes",
+   "note": "Such placement can leave some shards unfair, motivating the one-fair-shard experiment.",
+   "evidence": "App. C.3: 'can indeed result in some shards being unfair'"
+  },
+  {
+   "source": "fair-shard-construction",
+   "target": "data-sharding",
+   "relation": "is_a",
+   "note": "One shard gets equal counts per (religion, toxicity) combination and the rest are random.",
+   "evidence": "App. C.3"
+  },
+  {
+   "source": "fair-shard-construction",
+   "target": "unlearning-induced-unfairness",
+   "relation": "causes",
+   "note": "Unequal shards push unmitigated SISA EO to about 0.29 (S=3) and 0.36 (S=5), far above random splits.",
+   "evidence": "App. C.3, Fig. 5"
+  },
+  {
+   "source": "toxic-text-classification",
+   "target": "hatexplain",
+   "relation": "evaluates_on",
+   "note": "Offensive and hate are merged into a single toxic class.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "hatexplain",
+   "target": "sensitive-attribute",
+   "relation": "enables",
+   "note": "Its religion, race and gender annotations give coarse-grained sensitive groups.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "large-language-models",
+   "target": "undesirable-training-data",
+   "relation": "suffers_from",
+   "note": "Data at this scale cannot be properly curated.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "large-language-models",
+   "target": "unfairness",
+   "relation": "suffers_from",
+   "note": "Language models are known to exhibit social biases.",
+   "evidence": "Sec. 1, citing Bolukbasi, Borkan, Baldini"
+  },
+  {
+   "source": "bert",
+   "target": "llm",
+   "relation": "is_a",
+   "note": "Treated as an 'LLM' in this paper, although it is a smaller encoder model.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "gpt-2",
+   "target": "llm",
+   "relation": "is_a",
+   "note": "Treated as a state-of-the-art LLM architecture.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "distilgpt2",
+   "target": "gpt-2",
+   "relation": "builds_on",
+   "note": "A distilled version of GPT-2.",
+   "evidence": "Sec. 4 model list"
+  },
+  {
+   "source": "llm",
+   "target": "large-language-models",
+   "relation": "part_of",
+   "note": "Concrete model architectures within the LLM topic.",
+   "evidence": "Sec. 1"
+  }
+ ],
+ "cross_paper": [
+  {
+   "target_paper": "bourtoule2021-sisa",
+   "relation": "builds_on",
+   "note": "FairSISA directly studies and post-processes SISA ensembles (sharding plus majority vote, slicing dropped) and confirms SISA's accuracy drop with more shards on text data.",
+   "explicit": true
+  },
+  {
+   "target_paper": "ginart2019-deletion",
+   "relation": "cites",
+   "note": "Cited in related work, where it is grouped with approximate unlearning, even though its k-means deletion algorithms are exact.",
+   "explicit": true
+  },
+  {
+   "target_paper": "wen2026-fedshard",
+   "relation": "complementary",
+   "note": "Both study fairness side effects of shard-based unlearning. FedShard targets client-level efficiency and performance fairness in federated unlearning, while FairSISA targets group (equalized-odds) fairness of centralized SISA ensembles.",
+   "explicit": false
+  },
+  {
+   "target_paper": "gupta2024-ffc",
+   "relation": "complementary",
+   "note": "Another fairness-focused paper in the set, but in federated clustering with a different fairness notion; FairSISA's post-processing does not apply directly to it.",
+   "explicit": false
+  },
+  {
+   "target_paper": "rachapudi2026-bidlora",
+   "relation": "complementary",
+   "note": "Parameter-efficient (LoRA) unlearning could remove the per-slice checkpoint storage cost that made FairSISA drop SISA's slicing for LLMs.",
+   "explicit": false
+  }
+ ]
+}

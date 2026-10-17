@@ -1,0 +1,1659 @@
+{
+ "paper": {
+  "id": "rachapudi2026-bidlora",
+  "title": "BID-LoRA: A Parameter-Efficient Framework for Continual Learning and Unlearning",
+  "short": "BID-LoRA",
+  "authors": [
+   "Jagadeesh Rachapudi",
+   "Ritali Vatsi",
+   "Praful Hambarde",
+   "Amit Shukla"
+  ],
+  "affiliations": [
+   "Indian Institute of Technology Mandi, Mandi, India"
+  ],
+  "venue": "arXiv preprint (cs.LG), submitted to IEEE",
+  "year": 2026,
+  "arxiv": "2604.12686",
+  "file": "papers/2/2604.12686v1.pdf",
+  "one_liner": "Three separate LoRA adapters (retain, new, forget) on ViT attention layers plus 'escape unlearning' let a pretrained model repeatedly learn and forget classes while training about 5% of its parameters.",
+  "summary": "Systems like face-recognition access control must repeatedly enroll new identities (continual learning) and delete departed or privacy-protected ones (machine unlearning). The authors formalize this as Continual Learning-Unlearning (CLU). At each cycle t a model M(t-1) receives a forget set, a small replay buffer of retained data, and a new-class set, and must produce M(t) that forgets, retains and learns at once. They show that simply chaining existing CL and MU methods causes 'knowledge leakage': the retained knowledge slowly erodes over repeated cycles. Their fix, BID-LoRA, freezes a pretrained vision transformer and adds three LoRA adapters to the attention layers, one per objective (retain, new, forget). Each loss updates only its own adapter and its own classifier-head rows. For forgetting they propose 'escape unlearning': they compute an embedding direction as far as possible from every retained class centroid (a minimax problem on the unit sphere), scale it by lambda=10, and pull all forget-class embeddings onto that single point with an MSE loss. On a 6-cycle sliding-window benchmark (CIFAR-100 with DeiT; CASIA-Face100 with Face Transformer), BID-LoRA gets forget accuracy of about 0-0.9%, overall accuracy within roughly 2-6 points of a retrained oracle, and MIA close to 0.5. It trains about 5% of the parameters, while all five CLU baselines train 100%.",
+  "problem": "Continual learning methods are mature but machine unlearning methods are not, and there are few frameworks that learn new classes and remove old ones at the same time. Naively combining a CL method with an MU method causes knowledge leakage, a slow cross-cycle degradation of foundational/retained knowledge. Existing CLU methods (LSF, CLPU-DER++, UniCLUN, UG-CLU, UnCLe) update nearly all parameters, so they are too costly for large pretrained models, and they have been tested on only a few add/delete steps.",
+  "core_idea": "One adapter cannot serve three competing objectives (retain, acquire, forget) without gradient interference, and that interference accumulates as drift, which is knowledge leakage. BID-LoRA gives each objective its own low-rank adapter and lets each loss update only its own adapter and head rows. For forgetting, it does not use aggressive signals like gradient ascent. It 'passively' collapses forget-class embeddings onto a scaled escape point that lies maximally far from all retained class centroids, so forgetting barely disturbs retained representations.",
+  "setting": "Continual learning + class-level unlearning (CLU) on pre-trained vision transformers; centralized supervised image classification and face recognition; small replay buffer of retained data available",
+  "unlearning_type": "approximate",
+  "contributions": [
+   "Formal definition of the Continual Learning-Unlearning (CLU) problem, with a sequential adaptation operator M(t)=F(M(t-1), Df(t), Dr(t), Dnew(t)) and success criteria for forgetting, retention and learning.",
+   "Empirical demonstration that naive CL+MU combinations (ER-ACE+GS-LoRA, DER++ + FU, EWC+SalUn, ER-AML+GS-LoRA) suffer progressive knowledge leakage across CLU cycles (Fig. 7).",
+   "BID-LoRA: three-pathway LoRA (retain/new/forget adapters on attention layers) with gradient-isolated updates and masked classifier-head gradients, training about 5% of parameters (5.08% DeiT, 5.00% Face Transformer).",
+   "Escape unlearning: a minimax-derived escape direction maximally distant from retained class centroids, scaled (lambda_esc=10), used as an MSE target for forget-class embeddings.",
+   "A sliding-window CLU benchmark protocol (6 tasks, each retaining 20, forgetting 10, learning 10 classes) on CIFAR-100 and CASIA-Face100, in which all pretrained knowledge is eventually replaced.",
+   "Application to face recognition / identity management with GDPR/CCPA-driven deletion plus new-user enrollment."
+  ],
+  "method_steps": [
+   "Inputs for cycle t: previous model M(t-1) (pretrained DeiT / Face Transformer), forget data Df(t) (10 classes), replay buffer Dr(t) that is a 10% subset of the full retain data (20 classes), and new data Dnew(t) (10 classes).",
+   "Freeze backbone weights W. On the transformer attention layers, attach three LoRA adapters: retain (B_ret A_ret, rank 8), new (B_new A_new, rank 8) and forget (B_f A_f, rank 4). Classifier-head rows are grouped by retain/forget/new classes. Store a frozen copy of the model as teacher Mt.",
+   "Compute the class centroid c_k = mean of emb(x) over class k for each retain class in Dr (forget centroids are also computed but the escape problem uses only retain centroids).",
+   "Solve the minimax d* = argmin_{||d||=1} max_i d^T c_ri by iterative optimization from a random unit vector. This gives the unit direction least aligned with every retain centroid. Set the escape point t_escape = lambda_esc * d* (lambda_esc = 10, which pushes it outside the embedding sphere).",
+   "For each epoch and each mini-batch triple (Xret, Xf, Xnew), run the RETAIN update first. Freeze the forget and new adapters. Compute L_ret = lambda_ce * CE(z_r, y_r) + lambda_emb * MSE(e_r, e_teacher). Update only (B_ret, A_ret) and the retain-class head rows.",
+   "FORGET update: freeze the retain and new adapters. Compute L_f = MSE(emb(Xf), t_escape), a many-to-one collapse of all forget samples onto the escape point. Update only (B_f, A_f) and the forget-class head rows.",
+   "NEW update: freeze the retain and forget adapters. Compute L_new = CE(z_n, y_n). Update only (B_new, A_new) and the new-class head rows. Gradients of non-target head rows are masked to zero. If a cycle has only learning or only unlearning, the unused loss is masked.",
+   "After training, merge the adapters into the base weights. Algorithm 1 writes W <- W + S(B_ret A_ret + B_new A_new - B_f A_f), while Eq. (1) in Sec. IV-B writes +B_f A_f (sign inconsistency in the paper). The merged model M(t) runs inference with no extra cost.",
+   "Repeat for the next request: M(t+1) = F(M(t), ...). In the benchmark the class window slides by 10 each cycle, from classes 0-29 (pretrain) to 60-89 (task 6)."
+  ],
+  "key_definitions": [
+   {
+    "name": "Continual Learning-Unlearning (CLU)",
+    "plain": "A setting where a pretrained model repeatedly receives requests to forget some classes, keep others and learn new ones. Each request is handled by one adaptation step that modifies the previous model. Also called continual adaptation.",
+    "formal": "D = Dr_full U Df, Dr_full ∩ Df = ∅, Dnew ∩ D = ∅; M(t) = F(M(t-1), Df(t), Dr(t), Dnew(t)), t = 1..T. After step t: (3a) f_M(t): X_Df(i) -/-> Y_Df(i) for all i <= t; (3b) f_M(t): X_Dr(t) -> Y_Dr(t); (3c) f_M(t): X_Dnew(i) -> Y_Dnew(i)"
+   },
+   {
+    "name": "Three goals of CLU",
+    "plain": "(i) precise deletion of unwanted knowledge, (ii) efficient integration of new knowledge while preserving prior information, (iii) minimizing knowledge leakage across cycles.",
+    "formal": "Abstract / Sec. I"
+   },
+   {
+    "name": "Successful CLU criteria",
+    "plain": "Forgotten classes (including all earlier forgotten ones) should be at or below chance accuracy. Retained and new classes should match an oracle trained directly on the current target classes.",
+    "formal": "Forgetting: Acc(M(t), Df(i)) <= 1/C for all i <= t; Retention: Acc(M(t), Dr(t)) ≈ Acc(Oracle, Dr(t)); Learning: Acc(M(t), Dnew(t)) ≈ Acc(Oracle, Dnew(t)); C = number of classes"
+   },
+   {
+    "name": "Knowledge leakage",
+    "plain": "Foundational and retained knowledge slowly degrades over repeated learning-unlearning cycles. Unlike catastrophic forgetting, it is gradual and cumulative across adaptation cycles. The paper attributes it to interference among competing objectives sharing one set of parameters.",
+    "formal": "Measured empirically as the drop in overall accuracy Acco from Task 1 to Task 6, plus KL divergence to the oracle; Fig. 7 shows retain accuracy degrading per cycle for CL+MU combos"
+   },
+   {
+    "name": "LoRA update",
+    "plain": "A frozen weight matrix is augmented with a trainable low-rank product.",
+    "formal": "h = W x + S (B A x), B in R^{d x r}, A in R^{r x k}, r << min(d,k)"
+   },
+   {
+    "name": "Pathway-separated forward pass",
+    "plain": "Three low-rank adapters share a layer, but each one is trained only by its own objective.",
+    "formal": "h = W x + S (B_ret A_ret + B_new A_new + B_f A_f) x  (Eq. 1; Algorithm 1 merges with -B_f A_f)"
+   },
+   {
+    "name": "Class centroid",
+    "plain": "The mean embedding of all samples of a class.",
+    "formal": "c_k = (1/|D_k|) sum_{x in D_k} emb(x)"
+   },
+   {
+    "name": "Escape direction and escape point",
+    "plain": "The unit direction whose largest dot product with any retain-class centroid is as small as possible. Scaling it by lambda_esc places a target point far from the retain embeddings in both direction and distance.",
+    "formal": "d* = argmin_{||d||=1} max_i d^T c_ri ; t_escape = lambda_esc * d* (lambda_esc = 10)"
+   },
+   {
+    "name": "Escape (forget) loss",
+    "plain": "Pulls every forget-class sample embedding onto the same escape point, which destroys class-discriminative information.",
+    "formal": "L_f = MSE(emb(X_f), t_escape)"
+   },
+   {
+    "name": "Retention loss",
+    "plain": "Cross-entropy on replayed retain samples plus an embedding anchor that keeps student embeddings close to a frozen teacher copy.",
+    "formal": "L_ret = lambda_ce * CE(z_r, y_r) + lambda_emb * MSE(e_r, e_t)"
+   },
+   {
+    "name": "New-knowledge loss",
+    "plain": "Standard cross-entropy on new-class samples.",
+    "formal": "L_new = CE(z_n, y_n)"
+   },
+   {
+    "name": "Replay buffer assumption",
+    "plain": "A small subset of retained data is stored and replayed. The paper uses 10% of the retain data.",
+    "formal": "Dr ⊂ Dr_full, |Dr| >= 0.1 |Dr_full|"
+   },
+   {
+    "name": "Oracle",
+    "plain": "A model trained directly on the current target class range (e.g., classes 10-39 for task 1) without LoRA, incremental learning or unlearning. Used as the upper bound and as the reference for KL.",
+    "formal": "Sec. V-A 'Theoretical Best'"
+   },
+   {
+    "name": "Tunable ratio",
+    "plain": "The fraction of model parameters updated during a CLU step. Lower is better.",
+    "formal": "#trainable / #total parameters"
+   },
+   {
+    "name": "Metrics Accf/Accr/Accn/Acco",
+    "plain": "Accuracy on forgotten classes, retained classes and newly learned classes, and overall accuracy on retained plus new classes (definitions follow UG-CLU).",
+    "formal": "Ideal: Accf -> 0; Accr, Accn, Acco -> oracle; MIA -> 0.5; KL -> 0"
+   }
+  ],
+  "theory": [
+   {
+    "name": "No formal theorems",
+    "statement_plain": "The paper has no theorems, lemmas or proofs. All claims are supported empirically.",
+    "assumptions": "n/a",
+    "significance": "There is no unlearning guarantee (exact or certified). Forgetting is verified only by accuracy, label-only MIA and KL to the oracle."
+   },
+   {
+    "name": "Minimax escape direction (Eq. 3)",
+    "statement_plain": "d* minimizes the maximum alignment (dot product) with any retain centroid over unit vectors. The paper finds it by iterative optimization from a random start and asserts that it converges to the direction maximally distant from all retain centroids.",
+    "assumptions": "Embeddings meaningfully clustered by class; centroids computed from the 10% buffer. No convergence or optimality proof is given (the problem is nonconvex because of the unit-norm constraint).",
+    "significance": "Gives a principled, data-driven 'dustbin' target for forget embeddings. Fig. 6 (t-SNE, PCA-sphere) shows forget centroids moving toward d*."
+   },
+   {
+    "name": "Pathway-interference hypothesis (Sec. IV-B)",
+    "statement_plain": "A single adapter conflates retention, acquisition and forgetting. Their gradient interference causes cumulative drift, i.e., knowledge leakage. Separate adapters with gradient isolation prevent this.",
+    "assumptions": "Stated as a hypothesis; supported by Table IV (BID-LoRA vs standard LoRA) and Table VI (adapter ablation).",
+    "significance": "This is the main design rationale for using three adapters instead of one."
+   },
+   {
+    "name": "Necessity of the retain buffer (Sec. VI-A, informal argument)",
+    "statement_plain": "For non-convex deep models, no viable method removes the dependence on retain data Dr without hurting retention. Df can in principle be replaced by noise proxies or source-free methods, but Dr cannot.",
+    "assumptions": "Literature-survey argument. Source-free unlearning is limited to convex losses and linear heads. Exceptions exist only in generative settings (FLAT, ESD).",
+    "significance": "Justifies the 10% replay buffer, and names buffer-free CLU as the main future-work target."
+   }
+  ],
+  "complexity": "Trainable parameters: 5.08% (DeiT, CIFAR-100) and 5.00% (Face Transformer), versus 100% for all CLU baselines. Rank ablation on DeiT-Tiny: r=1 1.09%, r=2 2.30%, r=4 3.24%, r=8 5.08%, r=16 8.56%, r=32 14.80%, r=64 25.03%. Standard single LoRA on QKV+head uses 2.54%. Using a 10% retain buffer gives a reported 10x speedup over the full retain set (Table V: 1.0 -> 1x, 0.5 -> 2x, 0.3 -> 3.3x, 0.1 -> 10x). Inference has no extra cost because the adapters are merged into W. Training-time memory includes a frozen teacher copy plus three adapters. Each mini-batch does three sequential forward/backward passes (retain, forget, new). Escape-direction optimization cost is not reported. The paper reports no wall-clock comparison with baselines and no retrain-from-scratch timing.",
+  "experiments": {
+   "datasets": [
+    "CIFAR-100 (classes 0-89 used via the sliding window)",
+    "CASIA-Face100 (100 identities sampled from CASIA-WebFace, constructed by GS-LoRA [11])"
+   ],
+   "models": [
+    "DeiT (data-efficient image transformer; DeiT-Tiny explicitly in the rank ablation, main-table variant unclear)",
+    "Face Transformer (Zhong & Deng) for face recognition"
+   ],
+   "baselines": [
+    "LSF (Learning with Selective Forgetting, Shibata et al. 2021)",
+    "CLPU-DER++ (Liu et al. 2022)",
+    "UniCLUN (Chatterjee et al. 2024)",
+    "UG-CLU (Huang et al. 2025)",
+    "UnCLe (Adhikari et al. 2025)",
+    "Oracle (retrained on target class window)",
+    "Standard LoRA (single adapter on QKV + head) in ablation",
+    "CL+MU combos for leakage analysis: ER-ACE+GS-LoRA, DER++ + FU (Tarun et al. fast unlearning), EWC+SalUn, ER-AML+GS-LoRA"
+   ],
+   "metrics": [
+    "Forget accuracy Accf",
+    "Retain accuracy Accr",
+    "New-class accuracy Accn",
+    "Overall accuracy Acco (retain+new)",
+    "Membership inference attack success rate (label-only MIA, Choquette-Choo et al.; ideal 0.5)",
+    "KL divergence between model and oracle logits",
+    "Tunable ratio (% params updated)"
+   ],
+   "headline_results": [
+    "Protocol: pretrain on classes 0-29. Each of 6 tasks retains 20, forgets 10 and learns 10 classes, and the window slides by 10 per task (task 1 = classes 10-39 ... task 6 = classes 60-89).",
+    "CIFAR-100 BID-LoRA Acco, tasks 1-6: 76.03, 73.84, 74.80, 76.71, 75.16, 73.51 (Oracle: 78.89, 75.60, 77.64, 78.04, 78.44, 79.16).",
+    "CIFAR-100 BID-LoRA Accf: 0.93, 0.27, 0.13, 0.27, 0.67, 0.00. Accr: 75.71, 70.83, 72.33, 76.00, 72.33, 68.67. Accn: 76.93, 79.87, 79.73, 78.13, 80.80, 83.20. MIA: 0.57, 0.51, 0.54, 0.50, 0.50, 0.51. KL: 0.67, 0.60, 0.76, 0.69, 0.63, 0.79.",
+    "CASIA-Face100 BID-LoRA Acco, tasks 1-6: 93.20, 92.09, 92.29, 93.40, 92.62, 91.22 (Oracle: 95.65, 96.36, 94.85, 96.87, 94.58, 95.85). Accf: 0.10, 0.88, 0, 0, 0, 0. KL: 0.74-1.10. MIA: 0.50-0.57.",
+    "Tunable ratio is 5.08% (CIFAR) and 5.00% (face) for BID-LoRA versus 100% for every baseline.",
+    "Knowledge leakage (Acco drop from Task 1 to Task 6) is 2.52 points on CIFAR-100 (76.03 -> 73.51) and 1.98 on face (93.20 -> 91.22). The paper claims baselines such as LSF/UniCLUN drop 3-8%. In the table LSF drops 73.55 -> 68.46 on CIFAR, but UniCLUN goes 73.37 -> 73.33, which does not support the claim for UniCLUN.",
+    "BID-LoRA is not best in every task: on CIFAR-100, UnCLe has higher Acco in task 1 (76.83), CLPU-DER++ in task 4 (76.94) and UG-CLU in tasks 3 and 5 (75.81).",
+    "Rank ablation (DeiT-Tiny, 10 epochs), Acco: r1 41.58, r2 45.31, r4 57.77, r8 74.15, r16 78.86, r32 78.03, r64 78.74. Rank 8 was chosen, although r16 scores higher.",
+    "BID-LoRA vs standard LoRA (20 epochs): Acco 80.05 vs 77.88, Accr 77.14 vs 74.29, Accn 85.87 vs 85.07, Accf 0.13 vs 0.00, at 5.08% vs 2.54% params (not parameter-matched).",
+    "Retain-buffer ablation, Acco: ratio 1.0 -> 72.58, 0.5 -> 70.35, 0.3 -> 70.37, 0.1 -> 69.98 (10x faster). Accf = 0 at ratios <= 0.5.",
+    "Adapter ablation (pathways disabled at test). All on: Accf 0, Accr 84.09, Accn 56.82, Acco 75.00. Forget adapter off: Accf jumps back to 70.45. Retain off: Accr 0.23, Acco 21.67. New off: Accn 0. Pretrained model: Accf 73.64.",
+    "Escape scaling lambda_esc: 0 -> Accf 8.80, 2 -> 4.13, 5 -> 4.27, 10 -> 0.53 (Acco 72.74 / 75.01 / 74.18 / 73.45)."
+   ]
+  },
+  "limitations": [
+   "Needs a replay buffer of at least 10% of retain data. This conflicts with the paper's own GDPR/CCPA motivation, since it means storing face images (stated, and the main future-work item).",
+   "Forgetting is approximate and has no formal guarantee. It is verified only by accuracy, label-only MIA and KL to the oracle.",
+   "Table VI shows that switching off the forget adapter restores forget accuracy to 70.45%, so before merging, forgetting is a removable additive low-rank patch on top of intact base knowledge. Whether merged weights truly erase information (versus mask it) is not tested with relearning or adapter-subtraction attacks.",
+   "Accf of about 0% is far below the chance level 1/C that the paper itself sets as its criterion, which could itself make forgotten classes detectable (Streisand-type effect). Only a label-only MIA is used.",
+   "Only class-level unlearning. No instance/sample-level deletion and no task-agnostic mixed request patterns beyond the fixed 20/10/10 sliding window over 6 cycles.",
+   "Small scale: about 30 active classes per task, DeiT(-Tiny) and Face Transformer only. No experiments on large models despite the efficiency motivation.",
+   "Hyperparameters (lambda_ce, lambda_emb, LoRA scaling S, epochs and optimizer for the main tables, exactly which attention projections get adapters) are not fully specified. No seeds or variance are reported.",
+   "Internal inconsistencies: merge sign (+B_f A_f in Eq. 1 vs -B_f A_f in Algorithm 1). Task-5 baseline Acco values in Table I duplicate Task-3. The text claims Accr stays within 70.83-76.00 for tasks 2-6, but task 6 is 68.67. UG-CLU is called 'weight saliency-based' in Sec. V-B but gradient/Hessian/KL-based in Sec. II-D. The Discussion promises an 'algorithmic perspective' subsection that does not appear.",
+   "The standard-LoRA comparison is not parameter-matched (2.54% vs 5.08%). Baselines all train 100% of parameters, but their adaptation to pretrained DeiT (notably UnCLe, which the paper says cannot be directly applied to pretrained models) is not explained.",
+   "The criterion that all previously forgotten classes stay forgotten (for all i <= t) is stated, but the tables appear to report Accf only for the current forget set (unclear from text).",
+   "A single escape point is shared by all forget classes across cycles. Possible collisions with future new-class embeddings, or saturation after many cycles, are not analyzed."
+  ],
+  "future_work": [
+   "Eliminate the retention buffer entirely (reduce from 10% to 0%).",
+   "Extend to other biometric modalities such as iris and fingerprint recognition, where privacy-driven unlearning is critical."
+  ],
+  "relevance_to_efficient_unlearning": "BID-LoRA is a concrete template for cheap, repeated class-level unlearning on large pretrained models. It freezes the backbone, isolates the forgetting objective in a tiny rank-4 adapter, and merges it at the end, so each deletion request touches about 5% of parameters and needs only a 10% retain buffer (reported 10x faster than using full retain data). Escape unlearning is a simple, cheap alternative to gradient-ascent or random-label unlearning. It needs only class centroids, one small minimax solve and an MSE loss, and it avoids the retain-accuracy collapse that strong unlearning signals cause. For a project on efficient unlearning, the knowledge-leakage concept and the 6-cycle sliding-window protocol are useful evaluation tools: efficiency should be measured over many sequential requests, not just one. The main pitfalls are that the guarantees are only empirical, the forget adapter is literally separable from intact base knowledge before merging, and there is no wall-clock comparison against retraining. These leave room for combining adapter isolation with exact (SISA-style) or certified mechanisms.",
+  "open_questions": [
+   "Buffer-free or privacy-preserving CLU: replace the 10% retain buffer with stored class prototypes/centroids, generative replay, or teacher-only distillation. Then quantify the retention loss and the privacy gain.",
+   "Robustness of forgetting: since disabling the forget adapter restores Accf to about 70%, test relearning attacks, adapter-subtraction and stronger MIAs (e.g., LiRA/U-LiRA) on merged models, and compare against a retrain-from-scratch oracle.",
+   "Theory for escape unlearning: characterize the minimax d* (it relates to a smallest-enclosing-cone / max-margin problem). Bound the interference between the escape point and retain or future-new classes, and study behaviour as forgotten classes accumulate over many cycles.",
+   "Exact-unlearning variant: shard adapters per class or per request (a SISA-style idea) so that forgetting means deleting an adapter. Compare its cost and guarantees with BID-LoRA's approximate escape loss.",
+   "Instance-level and federated CLU: extend the three-pathway design to sample-level deletion and to clients in federated continual learning, where adapters could be communicated instead of full models.",
+   "Fair efficiency evaluation: run parameter-matched comparisons (single LoRA at 5% vs three adapters), wall-clock and FLOP accounting per request, and longer horizons (T >> 6) to check whether knowledge leakage keeps accumulating."
+  ]
+ },
+ "nodes": [
+  {
+   "id": "machine-unlearning",
+   "label": "Machine Unlearning",
+   "type": "topic",
+   "description": "Removing the influence of specific training data (samples, classes or tasks) from a trained model, ideally so that it behaves as if that data had never been seen.",
+   "aliases": [
+    "MU",
+    "unlearning"
+   ]
+  },
+  {
+   "id": "approximate-unlearning",
+   "label": "Approximate Unlearning",
+   "type": "topic",
+   "description": "Unlearning methods that modify a trained model to approximate a retrained-without-the-data model, usually without formal equivalence guarantees.",
+   "aliases": [
+    "inexact unlearning"
+   ]
+  },
+  {
+   "id": "exact-unlearning",
+   "label": "Exact Unlearning",
+   "type": "topic",
+   "description": "Unlearning whose output model is distributed identically to a model retrained from scratch without the deleted data.",
+   "aliases": []
+  },
+  {
+   "id": "class-unlearning",
+   "label": "Class-level Unlearning",
+   "type": "topic",
+   "description": "Unlearning setting where entire classes (e.g., identities) must be forgotten, as opposed to individual samples or whole tasks.",
+   "aliases": [
+    "class forgetting",
+    "class removal"
+   ]
+  },
+  {
+   "id": "continual-learning",
+   "label": "Continual Learning",
+   "type": "topic",
+   "description": "Training a model on a sequence of tasks or classes arriving over time while retaining performance on previously learned ones.",
+   "aliases": [
+    "CL",
+    "lifelong learning",
+    "incremental learning"
+   ]
+  },
+  {
+   "id": "continual-unlearning",
+   "label": "Continual Unlearning",
+   "type": "topic",
+   "description": "Handling a sequence of unlearning requests over time, or unlearning within a continual-learning system, without degrading retained knowledge.",
+   "aliases": [
+    "continual forgetting"
+   ]
+  },
+  {
+   "id": "continual-learning-unlearning",
+   "label": "Continual Learning-Unlearning (CLU)",
+   "type": "topic",
+   "description": "A paradigm in which a model repeatedly receives requests to both learn new knowledge and forget specified knowledge while preserving the rest; each request is a sequential adaptation step.",
+   "aliases": [
+    "CLU",
+    "continual adaptation",
+    "CLPU"
+   ]
+  },
+  {
+   "id": "parameter-efficient-fine-tuning",
+   "label": "Parameter-Efficient Fine-Tuning",
+   "type": "topic",
+   "description": "Adapting large pretrained models by training only a small number of added or selected parameters while keeping most weights frozen.",
+   "aliases": [
+    "PEFT"
+   ]
+  },
+  {
+   "id": "right-to-be-forgotten",
+   "label": "Right to be Forgotten",
+   "type": "topic",
+   "description": "Legal right (e.g., GDPR Art. 17, CCPA) of individuals to have their personal data erased, motivating machine unlearning.",
+   "aliases": [
+    "GDPR",
+    "CCPA",
+    "right to erasure"
+   ]
+  },
+  {
+   "id": "face-recognition",
+   "label": "Face Recognition",
+   "type": "topic",
+   "description": "Identifying or verifying people from facial images; a privacy-sensitive application where identities are frequently enrolled and withdrawn.",
+   "aliases": [
+    "identity management"
+   ]
+  },
+  {
+   "id": "knowledge-distillation",
+   "label": "Knowledge Distillation",
+   "type": "topic",
+   "description": "Training a student model to match outputs or internal representations of a teacher model.",
+   "aliases": [
+    "teacher-student"
+   ]
+  },
+  {
+   "id": "bid-lora",
+   "label": "BID-LoRA",
+   "type": "method",
+   "description": "Bi-Directional Low-Rank Adaptation: a CLU framework with separate retain, new and forget LoRA adapters on attention layers of a frozen transformer, trained with isolated losses and merged after each cycle.",
+   "aliases": [
+    "Bi-Directional LoRA"
+   ]
+  },
+  {
+   "id": "pathway-separation",
+   "label": "Three-Pathway Adapter Separation",
+   "type": "method",
+   "description": "Design pattern in which distinct adapters are dedicated to distinct, potentially conflicting objectives so their updates do not interfere.",
+   "aliases": [
+    "tri-pathway architecture",
+    "pathway separation"
+   ]
+  },
+  {
+   "id": "retain-adapter",
+   "label": "Retain Adapter (B_ret A_ret)",
+   "type": "method",
+   "description": "A low-rank adapter trained only on retained-data objectives to preserve existing knowledge and counteract drift caused by other adapters.",
+   "aliases": [
+    "retention pathway"
+   ]
+  },
+  {
+   "id": "new-adapter",
+   "label": "New-Knowledge Adapter (B_new A_new)",
+   "type": "method",
+   "description": "A low-rank adapter trained only on new-class data to acquire new knowledge.",
+   "aliases": [
+    "acquisition pathway",
+    "learn adapter"
+   ]
+  },
+  {
+   "id": "forget-adapter",
+   "label": "Forget / Unlearn Adapter (B_f A_f)",
+   "type": "method",
+   "description": "A low-rank adapter trained only on the forgetting objective, learning weights that nullify forget-class knowledge.",
+   "aliases": [
+    "unlearn adapter",
+    "forgetting pathway"
+   ]
+  },
+  {
+   "id": "escape-unlearning",
+   "label": "Escape Unlearning",
+   "type": "method",
+   "description": "An unlearning loss that collapses forget-class embeddings onto a single target point chosen to be maximally distant from retained-class centroids, destroying class-discriminative information without strongly perturbing retained representations.",
+   "aliases": [
+    "escape loss",
+    "dustbin point unlearning"
+   ]
+  },
+  {
+   "id": "escape-direction-minimax",
+   "label": "Minimax Escape Direction",
+   "type": "method",
+   "description": "Computing the unit vector whose maximum dot product with a set of class centroids is minimal, i.e., the direction least aligned with all of them; scaled to give an escape point.",
+   "aliases": [
+    "escape point",
+    "d*"
+   ]
+  },
+  {
+   "id": "prototype",
+   "label": "Class Prototype / Centroid",
+   "type": "method",
+   "description": "A representative vector for a class, typically the mean embedding of its samples.",
+   "aliases": [
+    "class centroid",
+    "class mean embedding"
+   ]
+  },
+  {
+   "id": "embedding-anchor-loss",
+   "label": "Embedding Anchor Loss",
+   "type": "method",
+   "description": "A feature-level distillation term (e.g., MSE) that keeps a student model's embeddings close to those of a frozen teacher to prevent representation drift.",
+   "aliases": [
+    "feature distillation anchor"
+   ]
+  },
+  {
+   "id": "gradient-isolated-updates",
+   "label": "Gradient-Isolated Updates with Head Masking",
+   "type": "method",
+   "description": "Training scheme where each loss updates only its designated parameters (adapter and classifier-head rows) while all others are frozen or have gradients masked to zero.",
+   "aliases": [
+    "gradient masking"
+   ]
+  },
+  {
+   "id": "adapter-merging",
+   "label": "Adapter Merging",
+   "type": "method",
+   "description": "Folding trained low-rank adapter products back into the base weight matrices so inference has no extra parameters or latency.",
+   "aliases": [
+    "LoRA merge"
+   ]
+  },
+  {
+   "id": "experience-replay",
+   "label": "Experience Replay",
+   "type": "method",
+   "description": "Storing a small buffer of past data and replaying it during later training to preserve earlier knowledge.",
+   "aliases": [
+    "replay buffer",
+    "rehearsal"
+   ]
+  },
+  {
+   "id": "lora",
+   "label": "LoRA",
+   "type": "method",
+   "description": "Low-Rank Adaptation: freeze a weight matrix W and learn an additive low-rank update BA, giving h = Wx + S·BAx.",
+   "aliases": [
+    "Low-Rank Adaptation",
+    "standard LoRA"
+   ]
+  },
+  {
+   "id": "sliding-window-clu-protocol",
+   "label": "Sliding-Window CLU Protocol",
+   "type": "method",
+   "description": "An evaluation protocol for continual learning-unlearning in which a fixed-size active class window slides over the label space, forgetting the oldest classes and learning new ones at each step.",
+   "aliases": [
+    "continual adapting evaluation protocol"
+   ]
+  },
+  {
+   "id": "retrain-from-scratch",
+   "label": "Retrain from Scratch (Oracle)",
+   "type": "method",
+   "description": "Training a fresh model only on the data that should remain; the gold-standard reference for unlearning.",
+   "aliases": [
+    "oracle",
+    "naive retraining"
+   ]
+  },
+  {
+   "id": "lsf",
+   "label": "LSF (Learning with Selective Forgetting)",
+   "type": "method",
+   "description": "CLU-like method by Shibata et al. (IJCAI 2021) that embeds class-specific mnemonic codes so classes can be forgotten by discarding codes and learned by adding new ones.",
+   "aliases": [
+    "mnemonic codes"
+   ]
+  },
+  {
+   "id": "clpu-der-plus-plus",
+   "label": "CLPU-DER++",
+   "type": "method",
+   "description": "Continual Learning and Private Unlearning (Liu, Liu, Stone 2022): keeps isolated temporary networks for tasks that may be forgotten, which are deleted for exact unlearning, plus a permanent DER++ model.",
+   "aliases": [
+    "CLPU"
+   ]
+  },
+  {
+   "id": "uniclun",
+   "label": "UniCLUN",
+   "type": "method",
+   "description": "Unified continual learning and unlearning framework (Chatterjee et al. 2024) using dual-teacher distillation (one CL teacher, one unlearning teacher) into a student with a replay buffer.",
+   "aliases": []
+  },
+  {
+   "id": "ug-clu",
+   "label": "UG-CLU",
+   "type": "method",
+   "description": "Unified gradient-based, task-agnostic continual learning-unlearning framework (Huang et al. 2025) optimized via KL divergence with online Hessian approximations.",
+   "aliases": [
+    "unified gradient-based CLU"
+   ]
+  },
+  {
+   "id": "uncle",
+   "label": "UnCLe",
+   "type": "method",
+   "description": "Unlearning framework for continual learning (Adhikari et al. 2025) that uses a hypernetwork to generate task-specific parameters from task embeddings and unlearns tasks data-free by aligning their generated parameters with noise.",
+   "aliases": [
+    "Unlearning Framework for Continual Learning"
+   ]
+  },
+  {
+   "id": "hypernetwork",
+   "label": "Hypernetwork",
+   "type": "method",
+   "description": "A network that generates the weights of another (target) network, often conditioned on a task embedding.",
+   "aliases": []
+  },
+  {
+   "id": "er-ace",
+   "label": "ER-ACE",
+   "type": "method",
+   "description": "Experience replay with asymmetric cross-entropy (Caccia et al.), which isolates new-class updates while replay consolidates all classes.",
+   "aliases": []
+  },
+  {
+   "id": "er-aml",
+   "label": "ER-AML",
+   "type": "method",
+   "description": "Experience replay with an asymmetric metric-learning loss (Caccia et al.) to reduce abrupt representation change in online continual learning.",
+   "aliases": []
+  },
+  {
+   "id": "der-plus-plus",
+   "label": "DER++ (Dark Experience Replay++)",
+   "type": "method",
+   "description": "Continual-learning method that replays stored samples together with their past logits (distillation) and labels.",
+   "aliases": [
+    "DER++",
+    "Dark Experience Replay"
+   ]
+  },
+  {
+   "id": "ewc",
+   "label": "Elastic Weight Consolidation (EWC)",
+   "type": "method",
+   "description": "Continual-learning regularizer that penalizes changes to parameters important for past tasks, weighted by Fisher information.",
+   "aliases": [
+    "EWC"
+   ]
+  },
+  {
+   "id": "gs-lora",
+   "label": "GS-LoRA",
+   "type": "method",
+   "description": "Continual forgetting method for pretrained vision models (Zhao et al. CVPR 2024) that applies LoRA to FFN modules with a group-sparsity regularizer.",
+   "aliases": [
+    "Group Sparse LoRA"
+   ]
+  },
+  {
+   "id": "salun",
+   "label": "SalUn",
+   "type": "method",
+   "description": "Saliency-based unlearning (Fan et al. 2023) that computes a gradient-based weight saliency mask and updates only weights most relevant to the forget data.",
+   "aliases": [
+    "SALUN",
+    "weight saliency unlearning"
+   ]
+  },
+  {
+   "id": "unsir",
+   "label": "UNSIR / Fast Unlearning (impair-repair)",
+   "type": "method",
+   "description": "Fast yet effective machine unlearning (Tarun et al.): learn error-maximizing noise to impair forget-class knowledge, then repair on retain data.",
+   "aliases": [
+    "FU",
+    "impair-and-repair",
+    "error-maximizing noise"
+   ]
+  },
+  {
+   "id": "knowledge-leakage",
+   "label": "Knowledge Leakage",
+   "type": "problem",
+   "description": "Gradual, cumulative degradation of retained or foundational knowledge across repeated learning and unlearning cycles.",
+   "aliases": [
+    "cumulative knowledge drift"
+   ]
+  },
+  {
+   "id": "catastrophic-forgetting",
+   "label": "Catastrophic Forgetting",
+   "type": "problem",
+   "description": "Abrupt loss of performance on previously learned tasks when a network is trained on new data.",
+   "aliases": []
+  },
+  {
+   "id": "gradient-interference",
+   "label": "Gradient Interference",
+   "type": "problem",
+   "description": "Conflict between gradients of different objectives that share parameters, so progress on one objective harms another.",
+   "aliases": [
+    "objective interference",
+    "gradient conflict"
+   ]
+  },
+  {
+   "id": "representation-drift",
+   "label": "Representation Drift",
+   "type": "problem",
+   "description": "Unintended shift in a model's internal feature embeddings during further training, which can degrade downstream heads relying on them.",
+   "aliases": [
+    "embedding drift",
+    "feature drift"
+   ]
+  },
+  {
+   "id": "utility-degradation",
+   "label": "Utility Degradation",
+   "type": "problem",
+   "description": "Loss of model accuracy on data that should be retained, caused by an unlearning or update procedure.",
+   "aliases": []
+  },
+  {
+   "id": "membership-inference-attack",
+   "label": "Membership Inference Attack",
+   "type": "problem",
+   "description": "An attack that infers whether a given sample was part of a model's training data from its outputs.",
+   "aliases": [
+    "MIA"
+   ]
+  },
+  {
+   "id": "model-inversion-attack",
+   "label": "Model Inversion Attack",
+   "type": "problem",
+   "description": "An attack that reconstructs representative training inputs (e.g., faces) from a model's parameters or outputs.",
+   "aliases": []
+  },
+  {
+   "id": "privacy-leakage",
+   "label": "Privacy Leakage",
+   "type": "problem",
+   "description": "Unintended exposure of sensitive information about individuals in training data through stored data, model outputs or parameters.",
+   "aliases": []
+  },
+  {
+   "id": "unlearning-cost",
+   "label": "Unlearning / Adaptation Cost",
+   "type": "problem",
+   "description": "Computational, storage and parameter overhead of processing deletion (and update) requests, e.g., retraining from scratch or updating all weights.",
+   "aliases": [
+    "computational overhead"
+   ]
+  },
+  {
+   "id": "clu-success-criteria",
+   "label": "CLU Formal Definition & Success Criteria",
+   "type": "theory",
+   "description": "Formal specification of a continual learning-unlearning step and conditions that a sequence of adapted models must satisfy for forgetting, retention and learning.",
+   "aliases": [
+    "CLU objectives"
+   ]
+  },
+  {
+   "id": "retain-data-necessity",
+   "label": "Necessity of Retain Data for Unlearning",
+   "type": "theory",
+   "description": "Claim that unlearning in non-convex deep models cannot preserve retained performance without access to (a subset of) retained data.",
+   "aliases": []
+  },
+  {
+   "id": "cifar-100",
+   "label": "CIFAR-100",
+   "type": "dataset",
+   "description": "60k 32x32 natural images across 100 classes; standard image-classification benchmark.",
+   "aliases": []
+  },
+  {
+   "id": "casia-face100",
+   "label": "CASIA-Face100",
+   "type": "dataset",
+   "description": "A 100-identity face-recognition subset sampled from CASIA-WebFace (constructed in the GS-LoRA continual-forgetting work).",
+   "aliases": []
+  },
+  {
+   "id": "casia-webface",
+   "label": "CASIA-WebFace",
+   "type": "dataset",
+   "description": "Large-scale face dataset of about 10k identities and 0.5M images collected from the web.",
+   "aliases": []
+  },
+  {
+   "id": "vit",
+   "label": "Vision Transformer (ViT)",
+   "type": "model",
+   "description": "Transformer architecture applied to sequences of image patches using self-attention.",
+   "aliases": [
+    "ViT"
+   ]
+  },
+  {
+   "id": "deit",
+   "label": "DeiT",
+   "type": "model",
+   "description": "Data-efficient Image Transformer (Touvron et al. 2021), a ViT variant trained efficiently with distillation; DeiT-Tiny is its smallest size.",
+   "aliases": [
+    "DeiT-Tiny",
+    "data-efficient image transformer"
+   ]
+  },
+  {
+   "id": "face-transformer",
+   "label": "Face Transformer",
+   "type": "model",
+   "description": "Vision-transformer-based face recognition model (Zhong & Deng 2021).",
+   "aliases": []
+  },
+  {
+   "id": "accuracy",
+   "label": "Accuracy",
+   "type": "metric",
+   "description": "Fraction of correctly classified examples.",
+   "aliases": []
+  },
+  {
+   "id": "forget-accuracy",
+   "label": "Forget Accuracy (Accf)",
+   "type": "metric",
+   "description": "Accuracy on data/classes that should be forgotten; lower (towards chance or zero) indicates stronger forgetting.",
+   "aliases": [
+    "Accf"
+   ]
+  },
+  {
+   "id": "retain-accuracy",
+   "label": "Retain Accuracy (Accr)",
+   "type": "metric",
+   "description": "Accuracy on data/classes that should be retained after an update or unlearning step.",
+   "aliases": [
+    "Accr"
+   ]
+  },
+  {
+   "id": "new-accuracy",
+   "label": "New-Class Accuracy (Accn)",
+   "type": "metric",
+   "description": "Accuracy on newly learned data/classes after a continual update.",
+   "aliases": [
+    "Accn"
+   ]
+  },
+  {
+   "id": "overall-accuracy",
+   "label": "Overall Accuracy (Acco)",
+   "type": "metric",
+   "description": "Accuracy over all classes the model should currently recognize (retained plus newly learned).",
+   "aliases": [
+    "Acco"
+   ]
+  },
+  {
+   "id": "membership-inference-success",
+   "label": "MIA Success Rate",
+   "type": "metric",
+   "description": "Success rate of a membership inference attacker; 0.5 means the attacker cannot distinguish members from non-members.",
+   "aliases": [
+    "MIA score"
+   ]
+  },
+  {
+   "id": "kl-divergence-to-oracle",
+   "label": "KL Divergence to Oracle",
+   "type": "metric",
+   "description": "KL divergence between an adapted model's output distribution and that of a reference (oracle/retrained) model; zero means identical logit-level behaviour.",
+   "aliases": [
+    "KL"
+   ]
+  },
+  {
+   "id": "tunable-ratio",
+   "label": "Tunable Ratio",
+   "type": "metric",
+   "description": "Proportion of a model's parameters that are updated during adaptation; a measure of parameter efficiency.",
+   "aliases": [
+    "trainable parameter ratio",
+    "% params"
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "bid-lora",
+   "relation": "proposes",
+   "note": "Main contribution: a three-adapter LoRA framework for CLU on frozen transformers.",
+   "evidence": "Sec. IV; 'we propose Bi-Directional Low-Rank Adaptation (BID-LoRA)'"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "escape-unlearning",
+   "relation": "proposes",
+   "note": "New forgetting loss pushing forget embeddings to a scaled escape point far from retain centroids.",
+   "evidence": "Sec. IV-C, Eqs. 2-5"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "pathway-separation",
+   "relation": "proposes",
+   "note": "Dedicated retain/new/forget adapters isolate competing objectives.",
+   "evidence": "Sec. IV-B 'Pathway Separation', Fig. 3"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "continual-learning-unlearning",
+   "relation": "proposes",
+   "note": "Formalizes CLU as a unified paradigm with three goals, building on earlier CLU works.",
+   "evidence": "Abstract; Sec. III-A"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "clu-success-criteria",
+   "relation": "proposes",
+   "note": "Defines constraints 3a-3c and accuracy-based success criteria relative to an oracle.",
+   "evidence": "Sec. III-A, Eqs. 3a-3c"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "sliding-window-clu-protocol",
+   "relation": "proposes",
+   "note": "Six-task sliding window (retain 20 / forget 10 / learn 10) claimed as first generalizable CLU benchmark.",
+   "evidence": "Sec. V-A Evaluation Protocol, Fig. 4"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "retain-data-necessity",
+   "relation": "proposes",
+   "note": "Argues informally (no proof) that the retain buffer is unavoidable for non-convex models.",
+   "evidence": "Sec. VI-A"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "knowledge-leakage",
+   "relation": "addresses",
+   "note": "Identifies and targets slow cross-cycle degradation from naive CL+MU combinations.",
+   "evidence": "Sec. VI-B, Fig. 7"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "catastrophic-forgetting",
+   "relation": "addresses",
+   "note": "Uses replay and frozen backbone to avoid forgetting retained classes while learning new ones.",
+   "evidence": "Sec. I 'we employ the replay mechanism'"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "right-to-be-forgotten",
+   "relation": "motivated_by",
+   "note": "GDPR/CCPA-driven deletion of identities motivates the unlearning direction.",
+   "evidence": "Impact Statement; Sec. I"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "face-recognition",
+   "relation": "motivated_by",
+   "note": "Identity management with enrollments and withdrawals is the flagship CLU application.",
+   "evidence": "Sec. I 'Face recognition presents the most urgent CLU need'"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "class-unlearning",
+   "relation": "addresses",
+   "note": "All forget requests are whole classes/identities (10 per cycle).",
+   "evidence": "Sec. V-A Evaluation Protocol"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "cifar-100",
+   "relation": "evaluates_on",
+   "note": "Classification benchmark over 6 sliding-window CLU tasks with DeiT.",
+   "evidence": "Table I"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "casia-face100",
+   "relation": "evaluates_on",
+   "note": "Face-recognition CLU benchmark with Face Transformer.",
+   "evidence": "Table II"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "deit",
+   "relation": "uses",
+   "note": "DeiT backbone for CIFAR-100; DeiT-Tiny in rank ablation.",
+   "evidence": "Sec. V-A; Sec. V-D1"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "face-transformer",
+   "relation": "uses",
+   "note": "Backbone for CASIA-Face100 experiments.",
+   "evidence": "Sec. V-A"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "forget-accuracy",
+   "relation": "measures_with",
+   "note": "Accf stays 0-0.93% on CIFAR-100 and 0-0.88% on face.",
+   "evidence": "Sec. V-C Unlearning Analysis"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "retain-accuracy",
+   "relation": "measures_with",
+   "note": "Accr reported per task (68.67-76.00 on CIFAR-100).",
+   "evidence": "Tables I, II"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "new-accuracy",
+   "relation": "measures_with",
+   "note": "Accn rises from 76.93 (task 1) to 83.20 (task 6) on CIFAR-100.",
+   "evidence": "Sec. V-C Convergence Patterns"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "overall-accuracy",
+   "relation": "measures_with",
+   "note": "Acco on retain+new classes, compared against oracle per task.",
+   "evidence": "Tables I, II"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "membership-inference-success",
+   "relation": "measures_with",
+   "note": "Label-only MIA; BID-LoRA scores 0.50-0.57 (ideal 0.5).",
+   "evidence": "Sec. V-A Metrics; ref [41]"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "kl-divergence-to-oracle",
+   "relation": "measures_with",
+   "note": "KL to oracle 0.60-0.79 (CIFAR) and 0.74-1.10 (face).",
+   "evidence": "Sec. V-C Knowledge Leakage Analysis"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "tunable-ratio",
+   "relation": "measures_with",
+   "note": "5.08% (DeiT) / 5.00% (Face Transformer) vs 100% for baselines.",
+   "evidence": "Tables I, II"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "lsf",
+   "relation": "compares_against",
+   "note": "CLU baseline; strong forgetting but Acco falls to 68.46 by task 6 on CIFAR-100.",
+   "evidence": "Sec. V-C Baseline Comparison"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "clpu-der-plus-plus",
+   "relation": "compares_against",
+   "note": "CLU baseline; paper notes unstable retention.",
+   "evidence": "Sec. V-B; Table I"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "uniclun",
+   "relation": "compares_against",
+   "note": "CLU baseline; Accr drops to 67.27 at CIFAR task 2.",
+   "evidence": "Sec. V-C Baseline Comparison"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "ug-clu",
+   "relation": "compares_against",
+   "note": "CLU baseline; beats BID-LoRA on Acco in CIFAR tasks 3 and 5 (75.81).",
+   "evidence": "Table I"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "uncle",
+   "relation": "compares_against",
+   "note": "CLU baseline at 100% tunable; MIA up to 0.67; best Acco on CIFAR task 1 (76.83).",
+   "evidence": "Sec. V-B; Table I"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "lora",
+   "relation": "compares_against",
+   "note": "Single standard LoRA on QKV+head is the ablation baseline: Acco 77.88 vs BID-LoRA's 80.05.",
+   "evidence": "Table IV"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "retrain-from-scratch",
+   "relation": "compares_against",
+   "note": "Oracle trained directly on each target class window is the upper bound and the KL reference.",
+   "evidence": "Sec. V-A 'Theoretical Best'"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "er-ace",
+   "relation": "compares_against",
+   "note": "Paired with GS-LoRA as a naive CL+MU combination exhibiting knowledge leakage.",
+   "evidence": "Sec. VI-B, Fig. 7"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "er-aml",
+   "relation": "compares_against",
+   "note": "Paired with GS-LoRA in the knowledge-leakage analysis.",
+   "evidence": "Sec. VI-B"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "der-plus-plus",
+   "relation": "compares_against",
+   "note": "Paired with FU (Tarun et al.) in the knowledge-leakage analysis.",
+   "evidence": "Sec. VI-B"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "ewc",
+   "relation": "compares_against",
+   "note": "Paired with SalUn in the knowledge-leakage analysis.",
+   "evidence": "Sec. VI-B"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "gs-lora",
+   "relation": "compares_against",
+   "note": "MU half of two CL+MU combos; also source of the CASIA-Face100 subset.",
+   "evidence": "Sec. VI-B; Sec. V-A"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "salun",
+   "relation": "compares_against",
+   "note": "MU half of the EWC+SalUn combo that shows leakage.",
+   "evidence": "Sec. VI-B"
+  },
+  {
+   "source": "rachapudi2026-bidlora",
+   "target": "unsir",
+   "relation": "compares_against",
+   "note": "MU half of the DER++ + FU combo that shows leakage.",
+   "evidence": "Sec. VI-B"
+  },
+  {
+   "source": "pathway-separation",
+   "target": "bid-lora",
+   "relation": "part_of",
+   "note": "Core architectural element of BID-LoRA.",
+   "evidence": "Sec. IV-B, Fig. 3"
+  },
+  {
+   "source": "retain-adapter",
+   "target": "pathway-separation",
+   "relation": "part_of",
+   "note": "Rank-8 adapter trained only by L_ret.",
+   "evidence": "Sec. V-A 'uniform rank 8 for both retain and new adapters'"
+  },
+  {
+   "source": "new-adapter",
+   "target": "pathway-separation",
+   "relation": "part_of",
+   "note": "Rank-8 adapter trained only by L_new.",
+   "evidence": "Sec. V-A"
+  },
+  {
+   "source": "forget-adapter",
+   "target": "pathway-separation",
+   "relation": "part_of",
+   "note": "Rank-4 adapter trained only by the escape loss L_f.",
+   "evidence": "Sec. V-A 'the forget adapter uses rank 4'"
+  },
+  {
+   "source": "escape-unlearning",
+   "target": "bid-lora",
+   "relation": "part_of",
+   "note": "Provides the forgetting objective for the forget pathway.",
+   "evidence": "Algorithm 1 lines 4-9, 21"
+  },
+  {
+   "source": "escape-direction-minimax",
+   "target": "escape-unlearning",
+   "relation": "part_of",
+   "note": "d* = argmin_{||d||=1} max_i d^T c_ri, scaled by lambda_esc=10.",
+   "evidence": "Eqs. 3-4"
+  },
+  {
+   "source": "escape-direction-minimax",
+   "target": "prototype",
+   "relation": "uses",
+   "note": "Uses retain-class mean embeddings computed from the replay buffer.",
+   "evidence": "Eq. 2, Algorithm 1 lines 5-7"
+  },
+  {
+   "source": "embedding-anchor-loss",
+   "target": "bid-lora",
+   "relation": "part_of",
+   "note": "MSE between student and frozen-teacher embeddings inside L_ret.",
+   "evidence": "Eq. 6"
+  },
+  {
+   "source": "gradient-isolated-updates",
+   "target": "bid-lora",
+   "relation": "part_of",
+   "note": "Each loss updates only its adapter and head rows; others frozen/masked.",
+   "evidence": "Sec. IV-C; Algorithm 1 lines 13, 20, 24"
+  },
+  {
+   "source": "adapter-merging",
+   "target": "bid-lora",
+   "relation": "part_of",
+   "note": "Adapters folded into W after each cycle (sign of the forget term inconsistent between Eq. 1 and Alg. 1).",
+   "evidence": "Algorithm 1 line 30"
+  },
+  {
+   "source": "experience-replay",
+   "target": "bid-lora",
+   "relation": "part_of",
+   "note": "10% retain buffer feeds L_ret and centroid computation.",
+   "evidence": "Sec. III-B Assumption 1"
+  },
+  {
+   "source": "bid-lora",
+   "target": "lora",
+   "relation": "builds_on",
+   "note": "Uses three LoRA modules per attention layer instead of one.",
+   "evidence": "Sec. IV-B 'LoRA-based Model Tuning'"
+  },
+  {
+   "source": "bid-lora",
+   "target": "parameter-efficient-fine-tuning",
+   "relation": "is_a",
+   "note": "Trains about 5% of parameters with a frozen backbone.",
+   "evidence": "Abstract '≈5% of parameters'"
+  },
+  {
+   "source": "bid-lora",
+   "target": "continual-learning-unlearning",
+   "relation": "addresses",
+   "note": "Handles simultaneous forget/retain/learn requests per cycle.",
+   "evidence": "Sec. IV-A"
+  },
+  {
+   "source": "bid-lora",
+   "target": "knowledge-leakage",
+   "relation": "mitigates",
+   "note": "Acco drops only 2.52 (CIFAR) and 1.98 (face) points over 6 cycles.",
+   "evidence": "Sec. V-C Knowledge Leakage Analysis"
+  },
+  {
+   "source": "bid-lora",
+   "target": "unlearning-cost",
+   "relation": "mitigates",
+   "note": "About 5% tunable parameters vs 100% for baselines; 10% buffer reported as 10x faster than full retain data.",
+   "evidence": "Tables I, V"
+  },
+  {
+   "source": "pathway-separation",
+   "target": "gradient-interference",
+   "relation": "mitigates",
+   "note": "Separate adapters mean drift in one does not corrupt others.",
+   "evidence": "Sec. IV-B 'without gradient interference'"
+  },
+  {
+   "source": "gradient-interference",
+   "target": "knowledge-leakage",
+   "relation": "causes",
+   "note": "Hypothesized cause: one adapter conflating three objectives yields cumulative drift.",
+   "evidence": "Sec. IV-B 'Interference among these objectives causes cumulative drift'"
+  },
+  {
+   "source": "retain-adapter",
+   "target": "knowledge-leakage",
+   "relation": "mitigates",
+   "note": "Preserves retained knowledge to counteract leakage caused by the forget and new adapters.",
+   "evidence": "Sec. IV-B"
+  },
+  {
+   "source": "retain-adapter",
+   "target": "embedding-anchor-loss",
+   "relation": "uses",
+   "note": "Trained with CE plus teacher-embedding anchor.",
+   "evidence": "Algorithm 1 line 17"
+  },
+  {
+   "source": "forget-adapter",
+   "target": "escape-unlearning",
+   "relation": "uses",
+   "note": "Trained solely with L_f = MSE(emb(X_f), t_escape).",
+   "evidence": "Algorithm 1 lines 20-22"
+  },
+  {
+   "source": "forget-adapter",
+   "target": "class-unlearning",
+   "relation": "addresses",
+   "note": "Disabling it at test restores Accf from 0 to 70.45%.",
+   "evidence": "Table VI"
+  },
+  {
+   "source": "new-adapter",
+   "target": "continual-learning",
+   "relation": "addresses",
+   "note": "Learns 10 new classes per cycle via cross-entropy.",
+   "evidence": "Eq. 7"
+  },
+  {
+   "source": "embedding-anchor-loss",
+   "target": "representation-drift",
+   "relation": "mitigates",
+   "note": "Keeps student embeddings near the frozen teacher and away from the escape point.",
+   "evidence": "Sec. IV-C, Eq. 6"
+  },
+  {
+   "source": "embedding-anchor-loss",
+   "target": "knowledge-distillation",
+   "relation": "is_a",
+   "note": "Feature-level distillation from a frozen copy of the initial model.",
+   "evidence": "Algorithm 1 line 3"
+  },
+  {
+   "source": "escape-unlearning",
+   "target": "approximate-unlearning",
+   "relation": "is_a",
+   "note": "Embedding-redirection loss with no formal guarantee.",
+   "evidence": "Sec. IV-C"
+  },
+  {
+   "source": "escape-unlearning",
+   "target": "utility-degradation",
+   "relation": "mitigates",
+   "note": "Described as a 'passive' alternative to strong unlearning signals that degrade retention.",
+   "evidence": "Sec. IV-C 'strong unlearning signals that degrade retention knowledge'"
+  },
+  {
+   "source": "escape-unlearning",
+   "target": "membership-inference-attack",
+   "relation": "mitigates",
+   "note": "Claimed to give verifiable protection; MIA near 0.5.",
+   "evidence": "Impact Statement; Tables I-II"
+  },
+  {
+   "source": "adapter-merging",
+   "target": "unlearning-cost",
+   "relation": "mitigates",
+   "note": "Merged adapters add no inference overhead.",
+   "evidence": "Sec. IV-B 'Adapters merge at inference, preserving efficiency'"
+  },
+  {
+   "source": "lora",
+   "target": "adapter-merging",
+   "relation": "enables",
+   "note": "LoRA's additive low-rank form allows folding into base weights.",
+   "evidence": "Sec. II-C 'efficiently trained and merged'"
+  },
+  {
+   "source": "lora",
+   "target": "parameter-efficient-fine-tuning",
+   "relation": "is_a",
+   "note": "Low-rank factorization family of PEFT.",
+   "evidence": "Sec. II-C"
+  },
+  {
+   "source": "lora",
+   "target": "knowledge-leakage",
+   "relation": "suffers_from",
+   "note": "Standard single-adapter LoRA in CLU degrades retained knowledge across steps.",
+   "evidence": "Sec. IV-B 'standard LoRA in CLU settings suffers from knowledge leakage'"
+  },
+  {
+   "source": "experience-replay",
+   "target": "catastrophic-forgetting",
+   "relation": "mitigates",
+   "note": "Replay buffer of retained classes reduces forgetting during adaptation.",
+   "evidence": "Sec. IV-A"
+  },
+  {
+   "source": "experience-replay",
+   "target": "privacy-leakage",
+   "relation": "causes",
+   "note": "Stored retain samples (e.g., faces) raise privacy risk; criticized for UniCLUN yet also needed by BID-LoRA.",
+   "evidence": "Sec. II-D 'replay buffers that raise privacy risks'"
+  },
+  {
+   "source": "experience-replay",
+   "target": "retain-data-necessity",
+   "relation": "motivated_by",
+   "note": "Retain buffer justified as unavoidable for non-convex unlearning.",
+   "evidence": "Sec. VI-A"
+  },
+  {
+   "source": "continual-learning-unlearning",
+   "target": "continual-learning",
+   "relation": "builds_on",
+   "note": "CLU includes acquiring new classes without forgetting retained ones.",
+   "evidence": "Sec. III-A goal (ii)"
+  },
+  {
+   "source": "continual-learning-unlearning",
+   "target": "machine-unlearning",
+   "relation": "builds_on",
+   "note": "CLU includes selective removal of targeted knowledge.",
+   "evidence": "Sec. III-A goal (i)"
+  },
+  {
+   "source": "continual-learning-unlearning",
+   "target": "continual-unlearning",
+   "relation": "extends",
+   "note": "Adds simultaneous new-class learning to sequential forgetting requests.",
+   "evidence": "Sec. III-A"
+  },
+  {
+   "source": "continual-learning-unlearning",
+   "target": "knowledge-leakage",
+   "relation": "suffers_from",
+   "note": "Repeated learn-unlearn cycles erode foundational knowledge when methods are naively combined.",
+   "evidence": "Sec. I; Fig. 7"
+  },
+  {
+   "source": "clu-success-criteria",
+   "target": "continual-learning-unlearning",
+   "relation": "part_of",
+   "note": "Formal requirements: Accf <= 1/C for all past forget sets, Accr and Accn approx oracle.",
+   "evidence": "Sec. III-A"
+  },
+  {
+   "source": "clu-success-criteria",
+   "target": "retrain-from-scratch",
+   "relation": "uses",
+   "note": "Retention and learning targets are defined relative to an oracle trained on target classes.",
+   "evidence": "Sec. III-A 'Oracle denotes a model trained directly on target classes'"
+  },
+  {
+   "source": "sliding-window-clu-protocol",
+   "target": "knowledge-leakage",
+   "relation": "measures_with",
+   "note": "Long 6-cycle protocol designed to expose cumulative degradation that short tests miss.",
+   "evidence": "Sec. V-A 'tests longevity and sustainability'"
+  },
+  {
+   "source": "knowledge-leakage",
+   "target": "catastrophic-forgetting",
+   "relation": "contrasts_with",
+   "note": "Leakage is slow, cumulative cross-cycle degradation rather than abrupt loss.",
+   "evidence": "Sec. I 'Unlike catastrophic forgetting, knowledge leakage is a slow degradation'"
+  },
+  {
+   "source": "knowledge-leakage",
+   "target": "overall-accuracy",
+   "relation": "measures_with",
+   "note": "Quantified as the Acco drop from task 1 to task 6.",
+   "evidence": "Sec. V-C 'measured by overall accuracy degradation across tasks'"
+  },
+  {
+   "source": "knowledge-leakage",
+   "target": "retain-accuracy",
+   "relation": "measures_with",
+   "note": "Fig. 7 tracks progressive retain-accuracy decline of CL+MU combos.",
+   "evidence": "Fig. 7 caption"
+  },
+  {
+   "source": "continual-learning",
+   "target": "catastrophic-forgetting",
+   "relation": "suffers_from",
+   "note": "New classes arriving without old data cause forgetting.",
+   "evidence": "Sec. II-A"
+  },
+  {
+   "source": "approximate-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Family of unlearning methods without exact equivalence.",
+   "evidence": "general"
+  },
+  {
+   "source": "exact-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Family with retrain-equivalent guarantees, e.g., CLPU's deletable temporary networks.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "class-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Granularity of unlearning where whole classes are removed.",
+   "evidence": "general"
+  },
+  {
+   "source": "continual-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Sequential-request variant of unlearning.",
+   "evidence": "Sec. II-B (GS-LoRA continual forgetting)"
+  },
+  {
+   "source": "machine-unlearning",
+   "target": "right-to-be-forgotten",
+   "relation": "motivated_by",
+   "note": "Regulatory removal under GDPR/CCPA is a primary target.",
+   "evidence": "Sec. I"
+  },
+  {
+   "source": "face-recognition",
+   "target": "model-inversion-attack",
+   "relation": "suffers_from",
+   "note": "Facial data can be reconstructed from models, motivating identity deletion.",
+   "evidence": "Sec. I refs [17]-[19]"
+  },
+  {
+   "source": "model-inversion-attack",
+   "target": "privacy-leakage",
+   "relation": "causes",
+   "note": "Reconstructed faces expose sensitive identity data.",
+   "evidence": "Sec. I"
+  },
+  {
+   "source": "membership-inference-attack",
+   "target": "membership-inference-success",
+   "relation": "measures_with",
+   "note": "Attack success near 0.5 indicates unlearned data is indistinguishable from never-seen data.",
+   "evidence": "Sec. V-A Metrics"
+  },
+  {
+   "source": "lsf",
+   "target": "continual-learning-unlearning",
+   "relation": "addresses",
+   "note": "First CLU-like system via mnemonic codes.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "lsf",
+   "target": "unlearning-cost",
+   "relation": "suffers_from",
+   "note": "Needs retraining from scratch with mnemonic embeddings; doubles compute; incompatible with pretrained models.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "clpu-der-plus-plus",
+   "target": "exact-unlearning",
+   "relation": "is_a",
+   "note": "Achieves exact unlearning by deleting isolated temporary networks.",
+   "evidence": "Sec. II-D 'achieves exact unlearning via isolated temporary networks'"
+  },
+  {
+   "source": "clpu-der-plus-plus",
+   "target": "der-plus-plus",
+   "relation": "builds_on",
+   "note": "Permanent model trained with DER++.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "clpu-der-plus-plus",
+   "target": "unlearning-cost",
+   "relation": "suffers_from",
+   "note": "Storage overhead grows with tasks and it requires retraining from scratch.",
+   "evidence": "Sec. II-D 'exponential storage overhead'"
+  },
+  {
+   "source": "clpu-der-plus-plus",
+   "target": "continual-learning-unlearning",
+   "relation": "addresses",
+   "note": "CL with private (deletable) task learning.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "uniclun",
+   "target": "continual-learning-unlearning",
+   "relation": "addresses",
+   "note": "First unified CL-UL approach handling mixed sequences.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "uniclun",
+   "target": "knowledge-distillation",
+   "relation": "uses",
+   "note": "Dual-teacher (CL teacher + UL teacher) distillation into a student.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "uniclun",
+   "target": "privacy-leakage",
+   "relation": "suffers_from",
+   "note": "Depends on replay buffers that raise privacy risks.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "ug-clu",
+   "target": "unlearning-cost",
+   "relation": "suffers_from",
+   "note": "Requires costly online Hessian approximations in an inner loop.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "uncle",
+   "target": "hypernetwork",
+   "relation": "uses",
+   "note": "Hypernetwork generates task-specific parameters from task embeddings.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "uncle",
+   "target": "continual-learning-unlearning",
+   "relation": "addresses",
+   "note": "Supports only task-level, data-free unlearning; per this paper it cannot be applied directly to pretrained DeiT.",
+   "evidence": "Sec. II-D"
+  },
+  {
+   "source": "gs-lora",
+   "target": "lora",
+   "relation": "builds_on",
+   "note": "LoRA on FFN modules with group-sparsity regularization.",
+   "evidence": "Sec. II-B"
+  },
+  {
+   "source": "gs-lora",
+   "target": "continual-unlearning",
+   "relation": "addresses",
+   "note": "Continual forgetting for pretrained vision models.",
+   "evidence": "Sec. II-B"
+  },
+  {
+   "source": "gs-lora",
+   "target": "bid-lora",
+   "relation": "contrasts_with",
+   "note": "GS-LoRA adapts FFNs for forgetting only; BID-LoRA adapts attention layers for forget+retain+learn.",
+   "evidence": "Sec. II-B vs Sec. IV-B"
+  },
+  {
+   "source": "salun",
+   "target": "approximate-unlearning",
+   "relation": "is_a",
+   "note": "Updates only salient weights for the forget data.",
+   "evidence": "Sec. II-B"
+  },
+  {
+   "source": "unsir",
+   "target": "approximate-unlearning",
+   "relation": "is_a",
+   "note": "Noise-based impair-then-repair unlearning that still needs Dr.",
+   "evidence": "Sec. II-B; Sec. VI-A"
+  },
+  {
+   "source": "ewc",
+   "target": "catastrophic-forgetting",
+   "relation": "mitigates",
+   "note": "Fisher-weighted quadratic penalty protecting important parameters.",
+   "evidence": "Sec. II-A"
+  },
+  {
+   "source": "er-ace",
+   "target": "experience-replay",
+   "relation": "is_a",
+   "note": "Replay with asymmetric cross-entropy.",
+   "evidence": "Sec. II-A"
+  },
+  {
+   "source": "er-aml",
+   "target": "experience-replay",
+   "relation": "is_a",
+   "note": "Replay with asymmetric metric learning.",
+   "evidence": "Sec. II-A"
+  },
+  {
+   "source": "der-plus-plus",
+   "target": "experience-replay",
+   "relation": "is_a",
+   "note": "Rehearsal storing samples and logits.",
+   "evidence": "Sec. II-A"
+  },
+  {
+   "source": "deit",
+   "target": "vit",
+   "relation": "is_a",
+   "note": "Data-efficient ViT variant used as CIFAR-100 backbone.",
+   "evidence": "Sec. V-A ref [38]"
+  },
+  {
+   "source": "face-transformer",
+   "target": "vit",
+   "relation": "is_a",
+   "note": "Transformer-based face recognizer used for CASIA-Face100.",
+   "evidence": "Sec. V-A ref [40]"
+  },
+  {
+   "source": "casia-face100",
+   "target": "casia-webface",
+   "relation": "part_of",
+   "note": "100 identities sampled from CASIA-WebFace.",
+   "evidence": "Sec. V-A"
+  },
+  {
+   "source": "forget-accuracy",
+   "target": "accuracy",
+   "relation": "is_a",
+   "note": "Accuracy restricted to forgotten classes.",
+   "evidence": "Sec. V-A Metrics"
+  },
+  {
+   "source": "retain-accuracy",
+   "target": "accuracy",
+   "relation": "is_a",
+   "note": "Accuracy restricted to retained classes.",
+   "evidence": "Sec. V-A Metrics"
+  },
+  {
+   "source": "new-accuracy",
+   "target": "accuracy",
+   "relation": "is_a",
+   "note": "Accuracy restricted to newly learned classes.",
+   "evidence": "Sec. V-A Metrics"
+  },
+  {
+   "source": "overall-accuracy",
+   "target": "accuracy",
+   "relation": "is_a",
+   "note": "Accuracy across retained plus new classes.",
+   "evidence": "Sec. V-A Metrics"
+  },
+  {
+   "source": "kl-divergence-to-oracle",
+   "target": "retrain-from-scratch",
+   "relation": "uses",
+   "note": "Logit-level divergence computed against the oracle model.",
+   "evidence": "Sec. V-A Metrics"
+  }
+ ],
+ "cross_paper": [
+  {
+   "target_paper": "adhikari2025-uncle",
+   "relation": "baseline",
+   "note": "UnCLe (cited as [36]) is one of five CLU baselines at 100% tunable parameters. BID-LoRA criticizes it as task-level only and as needing a hypernetwork trained from scratch rather than fine-tuning a pretrained model like DeiT. UnCLe still achieves the best CIFAR task-1 Acco (76.83).",
+   "explicit": true
+  },
+  {
+   "target_paper": "bourtoule2021-sisa",
+   "relation": "contrasts",
+   "note": "SISA gives exact unlearning through sharded retraining, whereas BID-LoRA is approximate, class-level and adapter-based, and also learns new classes. SISA-style isolation of per-request adapters is a natural route to exact CLU. Not cited.",
+   "explicit": false
+  },
+  {
+   "target_paper": "chen2025-meco",
+   "relation": "complementary",
+   "note": "Both target parameter- and knowledge-efficient continual adaptation for resource-constrained deployment. BID-LoRA's forget pathway suggests how an unlearning direction could be added to (federated) continual learning. Not cited.",
+   "explicit": false
+  },
+  {
+   "target_paper": "ginart2019-deletion",
+   "relation": "contrasts",
+   "note": "Ginart et al. formalize exact data deletion and deletion efficiency. BID-LoRA's CLU criteria are purely accuracy/oracle-based, with no distributional deletion guarantee. Not cited.",
+   "explicit": false
+  }
+ ]
+}

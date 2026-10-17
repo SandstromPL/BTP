@@ -1,0 +1,1559 @@
+{
+ "paper": {
+  "id": "gupta2024-ffc",
+  "title": "Fair Federated Data Clustering through Personalization: Bridging the Gap between Diverse Data Distributions",
+  "short": "p-FClus",
+  "authors": [
+   "Shivam Gupta",
+   "Tarushi",
+   "Tsering Wangzes",
+   "Shweta Jain"
+  ],
+  "affiliations": [
+   "Indian Institute of Technology Ropar, Punjab, India"
+  ],
+  "venue": "arXiv preprint (v2, 12 Jul 2024; marked 'Preprint submitted to Journal', journal not named)",
+  "year": 2024,
+  "arxiv": "2407.04302",
+  "file": "papers/3/2407.04302.pdf",
+  "one_liner": "p-FClus: single-round federated k-means/k-medoids where clients fine-tune server-aggregated centers locally, lowering per-client cost and cost deviation across clients.",
+  "summary": "This paper studies federated clustering: many clients (phones, banks, hospitals) each hold unlabeled data and want to find k cluster centers together without sharing raw data. Earlier methods (k-FED, one round; MFC, several rounds) produce one set of global centers, which under skewed non-IID data can sit far from some clients' data, giving those clients much higher cost and little reason to stay. The authors treat this spread of per-client cost as the fairness problem. They measure it with σ, the standard deviation across clients of each client's mean per-point clustering cost. Their method, p-FClus (personalized-Federated Clustering), needs one communication round. Each client clusters its own data and uploads its k local centers. The server clusters the union of all uploaded centers into k global centers and sends them back. Each client then fine-tunes its own copy of the global centers with point-wise SGD on a regularized objective, ending up with personalized centers. Matching each point to its nearest local and global center avoids aligning center indices across clients. The method works for any finite ℓ-norm, including k-means (ℓ=2) and k-medoids (ℓ=1). On synthetic, UCI, FMNIST, FEMNIST and WISDM data it usually gets lower mean and maximum cost than k-FED and MFC, and often lower σ. The paper has no theoretical guarantees.",
+  "problem": "Federated k-centroid clustering methods output a single global center set. Under non-IID or skewed client data, some clients incur much higher clustering cost than others (high cost deviation), which discourages them from participating. Existing methods either depend on the data distribution (k-FED does well only at high heterogeneity), need multiple rounds (MFC), or are computationally heavy (GAN- or encryption-based), and only handle k-means. Supervised personalization (e.g., Ditto) does not carry over directly because cluster centers have no canonical ordering across clients.",
+  "core_idea": "Do one-shot aggregation (local (k,ℓ)-clustering, then server-side (k,ℓ)-clustering of the union of local centers) and let each client fine-tune the received global centers on its own data. The update is point-wise SGD on P(x) = ½||c^g − x||_ℓ + λ||c^g − c^(z)||², where c^g and c^(z) are the global and local centers nearest to x. Matching through each data point's nearest centers avoids the center-correspondence problem. Per-client personalized centers lower both each client's cost and the spread of cost across clients.",
+  "setting": "Horizontal federated unsupervised learning: hard (k,ℓ)-clustering (k-means ℓ=2, k-medoids ℓ=1, any finite ℓ) of unlabeled data spread over Z clients; one round of client-server communication; no labels; benign clients; static data",
+  "unlearning_type": "none (paper is not about unlearning; it lists unlearning in clustering as client join/leave future work, citing Pan et al. 2022 = MUFC)",
+  "contributions": [
+   "Claims to be the first to bring personalization into federated data clustering: p-FClus gives per-client personalized centers with lower or comparable cost deviation (σ) across clients, i.e., a fairer clustering.",
+   "Gets lower mean per-point objective cost in a single round of server-client communication, independent of how data is divided among clients; claims to combine k-FED's single-shot efficiency with MFC's independence from data distribution.",
+   "Works for any finite ℓ-norm, including k-means (ℓ=2) and k-medoids (ℓ=1), whereas k-FED and MFC handle only k-means.",
+   "Point-wise gradient personalization with nearest local/global center mapping, which removes the need for center ordering or synchronization across clients.",
+   "Empirical study on synthetic (3 overlap levels), extrinsic (Adult, Bank, Diabetes, FMNIST) and intrinsic federated (FEMNIST, WISDM) datasets, with balanced/unequal splits, H in {2,5,7,10} and 50 to 1000 clients; code is public (github.com/P-FClus/p-FClus)."
+  ],
+  "method_steps": [
+   "Client initialization (Alg. 2, in parallel): each client z runs (k,ℓ)-clustering on its local data X^(z) (Lloyd's k-means for ℓ=2; Charikar et al. 1999 k-median/k-medoid for ℓ=1) and gets k local centers C^(z). It always computes k centers even if it holds only H<k distributions.",
+   "Upload: each client sends its k local centers C^(z) (k vectors of dimension h) to the server. This is the only uplink message; raw data never leaves the client.",
+   "Server (Alg. 3): form S = C^(1) ∪ ... ∪ C^(Z) (Z·k points, unweighted as described), run (k,ℓ)-clustering on S to get k global centers C^g, and broadcast C^g to all clients. This completes the single round.",
+   "Client personalization (Alg. 4): each client starts from C^g and, for t tuning steps or until convergence, loops over its local points x. For each x it finds the nearest local center c^(z) in C^(z) and the nearest current global/personalized center c^g in C^g.",
+   "It sets the learning rate η = 1/(number of local points currently assigned to c^g) and updates c^g ← c^g − η∇P(x), where P(x) = ½||c^g − x||_ℓ + λ||c^g − c^(z)||². For ℓ=2 the gradient is (c^g − x) + 2λ(c^g − c^(z)) (Eq. 6); for ℓ=1 it is written as 1/2 + 2λ(c^g − c^(z)) (Eq. 7).",
+   "It records the assignment φ^(z)[x] = c^g. λ (fine-tuning level) can be shared or set per client.",
+   "For k-medoids (ℓ=1), each final personalized center is replaced by the nearest data point in the client's local data, so centers remain data points.",
+   "Output: per-client personalized centers C^g(personalized) and assignments φ^(z). Evaluation computes µ, σ and max with each client's own personalized centers, whereas k-FED and MFC use their single global set."
+  ],
+  "key_definitions": [
+   {
+    "name": "Heterogeneity level H (Def. 1)",
+    "plain": "The maximum number of true distributions (clusters) that any single client's data comes from; H ≤ k. Low H means each client sees only a few clusters, the hard non-IID case.",
+    "formal": "H = max over z of #true distributions present in X^(z), H ≤ k"
+   },
+   {
+    "name": "(k,ℓ)-clustering objective cost (Def. 2)",
+    "plain": "A client's cost is the sum over its points of the ℓ-th power distance to the assigned center; the global cost sums these over clients.",
+    "formal": "L_ℓ^(z)(C^g) = Σ_{x∈X^(z)} Σ_{c^g∈C^g} I[φ^(z)(x)=c^g] d(x,c^g)^ℓ ; L_ℓ(C^g) = Σ_z L_ℓ^(z)(C^g)"
+   },
+   {
+    "name": "Mean cost per point µ (Eqs. 2-3)",
+    "plain": "Per-client average cost per data point, then averaged uniformly over clients, so large clients do not dominate.",
+    "formal": "µ^(z)(C^g) = L_ℓ^(z)(C^g)/|X^(z)| ; µ(C^g) = (1/Z) Σ_z µ^(z)(C^g)"
+   },
+   {
+    "name": "Fair federated clustering / cost deviation σ (Def. 3, Eq. 4)",
+    "plain": "Center set C1 is fairer than C2 if the standard deviation across clients of their per-point costs is lower, i.e., costs are more uniform across clients. This is client-level performance fairness, not group or demographic fairness.",
+    "formal": "σ(C^g) = sqrt( Σ_z (µ^(z)(C^g) − µ(C^g))² / Z ); C1 fairer than C2 iff σ(C1) < σ(C2)"
+   },
+   {
+    "name": "Maximum cost per point (max)",
+    "plain": "The worst per-point cost any single client suffers, used as a second fairness metric.",
+    "formal": "max = max_z µ^(z)(C)"
+   },
+   {
+    "name": "Personalization objective P(x) (Eq. 5)",
+    "plain": "For each local point, a trade-off between the cost to its nearest global center and an L2 penalty that keeps that global center close to the point's nearest local center. λ is the fine-tuning level.",
+    "formal": "P(x) = ½||c^g − x||_ℓ + λ||c^g − c^(z)||², with c^g = argmin_{c∈C^g} d(x,c), c^(z) = argmin_{c∈C^(z)} d(x,c)"
+   },
+   {
+    "name": "Personalization SGD step (Eq. 8)",
+    "plain": "Online-k-means-style step whose learning rate is the inverse of the number of points currently assigned to that center.",
+    "formal": "c^g ← c^g − η ∇_{c^g} P(x), η = 1/|{x : argmin_{c∈C^g} d(x,c) = c^g}|"
+   }
+  ],
+  "theory": [
+   {
+    "name": "No theorems",
+    "statement_plain": "The paper has no theorems, lemmas, propositions or proofs. It states no approximation ratio, convergence result, fairness bound or privacy guarantee for p-FClus.",
+    "assumptions": "n/a",
+    "significance": "All claims rest on experiments. Formal analysis is open: approximation quality of server clustering on the union of local centers, convergence of personalization SGD, a bound on σ, and deletion sensitivity."
+   },
+   {
+    "name": "Eq. 6 (k-means gradient)",
+    "statement_plain": "For ℓ=2 the gradient of P(x) with respect to c^g is (c^g − x) + 2λ(c^g − c^(z)). The clustering term is treated as ½||c^g − x||², justified by 'minimizing euclidean distance is the same as minimizing squared euclidean'.",
+    "assumptions": "ℓ=2; c^g and c^(z) are the global and local centers nearest to x",
+    "significance": "Gives a MacQueen-like online update plus a pull toward the local center. The derivation silently replaces Eq. 5's non-squared norm with a squared one."
+   },
+   {
+    "name": "Eq. 7 (k-medoids gradient)",
+    "statement_plain": "For ℓ=1 the gradient is written as 1/2 + 2λ(c^g − c^(z)). The subgradient of ½||c^g − x||_1 is ½·sign(c^g − x), so the constant 1/2 is probably a typo (missing sign term).",
+    "assumptions": "ℓ=1; afterwards the center is snapped to the nearest local data point",
+    "significance": "This is how ℓ=1 is supported; taken literally, Eq. 7 does not depend on x."
+   },
+   {
+    "name": "Implicit approximation via subroutines",
+    "statement_plain": "Local and server steps call Lloyd (k-means heuristic) or Charikar et al. 1999 (a constant-factor k-median approximation). The paper does not derive any end-to-end guarantee from these.",
+    "assumptions": "n/a",
+    "significance": "A student could try to prove a bound for 'cluster the union of local centers', as in k-FED/Awasthi-Sheffet-style analyses, and then for personalization."
+   }
+  ],
+  "complexity": "No formal statement. From the algorithm: one communication round. Uplink is k·h numbers per client (Z·k·h in total); downlink is k·h per client. Client compute is local (k,ℓ)-clustering (Lloyd: O(I·n_z·k·h)) plus personalization O(t·n_z·k·h), with two nearest-center searches per point per step. Server compute is (k,ℓ)-clustering of only Z·k points. No wall-clock or communication measurements are reported. Unlearning costs are not discussed. By inspection, removing a client means dropping its k centers from S, re-clustering Z·k points and re-broadcasting, after which every client must re-personalize.",
+  "experiments": {
+   "datasets": [
+    "Synthetic 2-D Gaussian mixtures, 10 components: Syn-NO (no overlap, N(10i,1)), Syn-LO (little overlap, sd 2), Syn-O (overlapping, sd 3)",
+    "Adult (UCI census, 32,562 records; age, fnlwgt, education-num, capital-gain, hours-per-week)",
+    "Bank Marketing (UCI, Portugal, 41,108 records; 6 numeric attributes)",
+    "Diabetes 130-US hospitals (UCI; age, time in hospital)",
+    "Fashion-MNIST (60,000 training images)",
+    "FEMNIST (LEAF; intrinsic H=62, 500 clients)",
+    "WISDM (accelerometer activity recognition, 1,098,207 samples, H=6, 36 clients)"
+   ],
+   "models": [
+    "k-means (ℓ=2) and k-medoids (ℓ=1) center-based clustering; no neural models"
+   ],
+   "baselines": [
+    "CentClus: centralized Lloyd k-means / Charikar et al. k-medoids",
+    "k-FED (Dennis et al., ICML 2021): one-shot, Awasthi-Sheffet locally plus a farthest-point heuristic at the server",
+    "MFC (Makkar et al., ECAI 2023): multi-shot extension of k-FED",
+    "For k-medoids, only CentClus is compared because k-FED and MFC are k-means-only"
+   ],
+   "metrics": [
+    "Mean cost per data point µ (lower is better)",
+    "Cost deviation per data point σ (fairness, lower is better)",
+    "Maximum per-client cost per point, max (lower is better)"
+   ],
+   "headline_results": [
+    "Setup: balanced and unequal (deliberately skewed) splits; H in {2,5,7,10}; 50/100/500/1000 clients; mean ± std over 5 seeds {0,300,600,900,1200}; Intel Xeon 6246R with 280 GB RAM. The values of λ and t used are not reported.",
+    "WISDM, k-means (Table 1): µ p-FClus 5.64e11 vs MFC 3.35e12 vs k-FED 5.71e12; σ 1.96e11 vs 2.51e12 vs 1.32e13; max 1.19e12 vs 1.10e13 vs 7.21e13. That is about 6-10x lower µ and an order of magnitude or more lower σ and max. The text's claim of µ reduced 'by an order of 10^5' does not match the table.",
+    "FEMNIST, k-means (Table 1): µ k-FED 2.806 (best), p-FClus 3.103, MFC 3.158; σ MFC 0.3110 (best), k-FED 0.3518, p-FClus 0.3640 (worst); max p-FClus 4.170 (best) vs MFC 4.371 vs k-FED 4.478.",
+    "Balanced splits (Figs. 1-3, figures only, no numbers in text): p-FClus has lower µ and max than k-FED/MFC across H, especially at low H. σ is lower on Adult and Bank for most H. On Diabetes, k-FED/MFC have lower σ but higher variance. FMNIST σ is similar for all methods. On synthetic data, MFC ≈ p-FClus with no overlap but degrades with overlap, and k-FED is always much worse.",
+    "Unequal splits (Figs. 4-6): on Adult, k-FED/MFC σ is higher at small H but falls below p-FClus as H grows. The authors argue p-FClus has a tighter confidence interval and much lower µ.",
+    "k-medoids vs CentClus (Tables 2-3): Adult µ is 1.08-1.32 for p-FClus vs 1.64 for CentClus. Bank µ is 1.09-1.71 for p-FClus vs 0.61 for CentClus. p-FClus σ ranges 0.03-0.23, vs CentClus 0.03 (Adult) and 0.14 (Bank).",
+    "k-medoids intrinsic (Table 4): FEMNIST p-FClus µ 6.87, σ 0.96, max 9.69 vs CentClus 2.91, 0.65, 4.32. WISDM p-FClus µ 1.08e13, σ 2.64e13, max 1.30e14; CentClus was infeasible there (about 8 TB of memory needed)."
+   ]
+  },
+  "limitations": [
+   "No theoretical guarantees of any kind (approximation, convergence, fairness bound, privacy).",
+   "The comparison is not like-for-like. p-FClus is scored with each client's own personalized centers (effectively Z·k centers), while k-FED and MFC are scored with one global set of k centers, which favours p-FClus on µ.",
+   "Fairness means only the dispersion (σ) and maximum of per-client mean cost; this is not group or demographic fairness. p-FClus's σ is sometimes worse (unequal-split Adult at higher H; FEMNIST σ 0.364 is the worst of the three).",
+   "Eq. 5's regularizer λ||c^g − c^(z)||² pulls the personalized center toward the nearest local center. The text says it stops C^g 'collapsing to C^(z)', which contradicts the math. Unlike Ditto, which anchors to the global model, global knowledge is kept only through initialization at C^g and the finite number of steps t.",
+   "The math has slips: Eq. 6 assumes a squared norm, and Eq. 7 drops the sign(c^g − x) term.",
+   "The tables have inconsistencies. The CentClus Adult row shows max 0.60 below µ 1.64, which is impossible. The Table 2 caption says 100 and 1000 clients but its header says 500. The text says k-medoids µ is 'quite close' to centralized, yet on Bank it is about 2x worse and on FEMNIST about 2.4x worse.",
+   "The server sees raw local centers; there is no secure aggregation or differential privacy, and the privacy claim is only that raw data is not shared.",
+   "The union S is clustered without weighting by local cluster sizes, at least as described, so tiny clusters count as much as big ones.",
+   "λ and the number of tuning steps t are not reported; there is no sensitivity study for λ, and no runtime or communication measurements despite the efficiency claims.",
+   "The paper assumes benign, non-strategic clients, static data and a known k, and has no mechanism for clients joining or leaving."
+  ],
+  "future_work": [
+   "Robust personalized federated clustering with malicious clients (Gupta et al. 2023a) and noisy data (Rehman et al. 2022).",
+   "Clients that strategically misreport features and so degrade the local centers (Stoica & Papadimitriou 2018).",
+   "Effects of unlearning in clustering as clients join and leave the federation (Pan et al. 2022 = MUFC)."
+  ],
+  "relevance_to_efficient_unlearning": "p-FClus is not an unlearning method, but its one-shot design makes deletion easy to analyse. The global centers depend on client data only through the Z·k uploaded local centers. So deleting a client means dropping its k centers from S, re-clustering a tiny set and re-broadcasting, followed by local re-personalization: one extra round. Deleting a point affects only its own client's local centers, and everything else only if those centers move. Ginart-style quantized or stable local k-means could therefore make most deletions exact no-ops. Pan et al.'s MUFC, which this paper cites as future work, gives exact federated cluster unlearning through quantized, securely aggregated local summaries. p-FClus has no secure aggregation or guarantees, and a deleted client's influence persists in every other client's personalized centers until they re-personalize. The σ and max metrics give a ready-made way to measure whether unlearning hurts some clients more than others (unlearning fairness, as in FedShard).",
+  "open_questions": [
+   "Design an exact unlearning protocol for p-FClus: client removal by deleting C^(z) from S and re-clustering, and point removal by quantized or stability-certified local centers (Ginart Q-k-means) so that most deletions trigger no communication. Bound the expected number of deletions that force a re-broadcast.",
+   "Does unlearning a client or point increase σ or max for the remaining clients? Define and bound 'unlearning fairness' for personalized federated clustering (cf. FedShard's efficiency and performance fairness).",
+   "Can re-personalization after a deletion be warm-started from the old personalized centers with a provable distance or cost bound, giving approximate or certified unlearning instead of full re-personalization?",
+   "Prove an approximation guarantee for 'cluster the union of local centers, then personalize', and a convergence guarantee for the Eq. 8 SGD with the inverse-count learning rate.",
+   "Add MUFC-style secure aggregation (SCMA) or DP to the uploaded local centers and measure the cost to personalization quality and to unlearning cost.",
+   "Weight S by local cluster sizes and test the effect on µ, σ and how much the global centers move when a client is deleted."
+  ]
+ },
+ "nodes": [
+  {
+   "id": "p-fclus",
+   "label": "p-FClus",
+   "type": "method",
+   "description": "Personalized federated clustering. Clients cluster locally, the server clusters the union of local centers into k global centers in one round, and each client fine-tunes those centers on its own data with a regularized point-wise SGD objective.",
+   "aliases": [
+    "personalized-Federated Clustering",
+    "pFClus",
+    "FFC"
+   ]
+  },
+  {
+   "id": "p-fclus-client-initialization",
+   "label": "Local (k,ℓ)-clustering at clients",
+   "type": "method",
+   "description": "First phase of one-shot federated clustering: each client independently computes k centers on its private data and sends only those centers.",
+   "aliases": [
+    "clientInitialization",
+    "local center computation"
+   ]
+  },
+  {
+   "id": "p-fclus-server-aggregation",
+   "label": "Server clustering of union of local centers",
+   "type": "method",
+   "description": "Aggregation step that pools all clients' local centers into one set and re-clusters it into k global centers instead of averaging parameters.",
+   "aliases": [
+    "Server procedure",
+    "center-of-centers clustering"
+   ]
+  },
+  {
+   "id": "p-fclus-client-personalization",
+   "label": "Client-side center personalization",
+   "type": "method",
+   "description": "Unsupervised local fine-tuning of received global centers on a client's own data to obtain client-specific centers.",
+   "aliases": [
+    "clientPersonalization",
+    "unsupervised fine-tuning"
+   ]
+  },
+  {
+   "id": "personalization-objective",
+   "label": "Personalization objective P(x)",
+   "type": "method",
+   "description": "Point-wise loss combining the distance of a point to its nearest global center with an L2 penalty tying that center to the point's nearest local center, weighted by a fine-tuning level λ.",
+   "aliases": [
+    "regularized clustering objective",
+    "Eq. 5"
+   ]
+  },
+  {
+   "id": "nearest-center-mapping",
+   "label": "Point-wise nearest-center mapping",
+   "type": "method",
+   "description": "Relating centers of different clusterings through data points: each point is matched to its nearest center in each model, so center indices never need to be aligned.",
+   "aliases": [
+    "data point-wise gradient update",
+    "nearest local/global center mapping"
+   ]
+  },
+  {
+   "id": "count-based-learning-rate",
+   "label": "Inverse-count learning rate",
+   "type": "method",
+   "description": "Online k-means step size equal to 1/(number of points assigned to a center), as in MacQueen's sequential k-means.",
+   "aliases": [
+    "η = 1/n_c",
+    "MacQueen step size"
+   ]
+  },
+  {
+   "id": "medoid-projection",
+   "label": "Snap-to-nearest-data-point",
+   "type": "method",
+   "description": "Projection that replaces a continuous center by the nearest actual data point so the k-medoids constraint holds.",
+   "aliases": [
+    "medoid snapping"
+   ]
+  },
+  {
+   "id": "stochastic-gradient-descent",
+   "label": "Stochastic Gradient Descent",
+   "type": "method",
+   "description": "Iterative optimization that updates parameters using the gradient of the loss on single samples or mini-batches.",
+   "aliases": [
+    "SGD"
+   ]
+  },
+  {
+   "id": "lloyds-algorithm",
+   "label": "Lloyd's algorithm",
+   "type": "method",
+   "description": "Standard k-means heuristic that alternates between assigning points to their nearest center and recomputing centers as cluster means.",
+   "aliases": [
+    "k-means heuristic",
+    "Lloyd 1982"
+   ]
+  },
+  {
+   "id": "k-median-charikar",
+   "label": "Charikar et al. k-median approximation",
+   "type": "method",
+   "description": "Constant-factor approximation algorithm for the k-median problem (Charikar, Guha, Tardos, Shmoys, STOC 1999), used here for k-medoid clustering.",
+   "aliases": [
+    "Charikar 1999",
+    "k-medoid solver"
+   ]
+  },
+  {
+   "id": "k-fed",
+   "label": "k-FED",
+   "type": "method",
+   "description": "One-shot federated k-means (Dennis, Li, Smith, ICML 2021). Clients run Awasthi-Sheffet locally and send their centers; the server picks k global centers with a farthest-point style heuristic.",
+   "aliases": [
+    "kFED",
+    "one-shot federated clustering"
+   ]
+  },
+  {
+   "id": "mfc",
+   "label": "MFC",
+   "type": "method",
+   "description": "Multishot Federated Clustering (Makkar et al., ECAI 2023): extends k-FED with several low-information rounds in which only the maximum-cost cluster center is shared, so it works at both low and high heterogeneity.",
+   "aliases": [
+    "Multishot Federated Clustering"
+   ]
+  },
+  {
+   "id": "awasthi-sheffet-clustering",
+   "label": "Awasthi-Sheffet clustering",
+   "type": "method",
+   "description": "Spectral-initialization k-means with improved spectral-norm separation guarantees for well-separated clusters (Awasthi & Sheffet, APPROX 2012).",
+   "aliases": [
+    "Awasthi"
+   ]
+  },
+  {
+   "id": "farthest-point-heuristic",
+   "label": "Farthest-point heuristic",
+   "type": "method",
+   "description": "Greedy k-center style selection that repeatedly picks the point farthest from the centers chosen so far.",
+   "aliases": [
+    "farthest-first traversal",
+    "k-center heuristic"
+   ]
+  },
+  {
+   "id": "centralized-clustering",
+   "label": "Centralized clustering (CentClus)",
+   "type": "method",
+   "description": "Clustering run on all data pooled at one site; the non-private reference point for federated clustering.",
+   "aliases": [
+    "CentClus",
+    "centralized k-means/k-medoids"
+   ]
+  },
+  {
+   "id": "ditto",
+   "label": "Ditto",
+   "type": "method",
+   "description": "Personalized federated learning method (Li, Hu, Beirami, Smith, ICML 2021) that trains per-client models regularized toward the global model, improving fairness and robustness.",
+   "aliases": [
+    "Ditto personalization"
+   ]
+  },
+  {
+   "id": "fedavg",
+   "label": "FedAvg",
+   "type": "method",
+   "description": "Federated Averaging: the server averages client model parameters, weighted by local dataset size.",
+   "aliases": [
+    "Federated Averaging"
+   ]
+  },
+  {
+   "id": "mufc",
+   "label": "MUFC",
+   "type": "method",
+   "description": "Machine Unlearning of Federated Clusters (Pan et al.): federated clustering with efficient exact removal of clients or points, using quantized local summaries and secure aggregation.",
+   "aliases": [
+    "Machine Unlearning of Federated Clusters"
+   ]
+  },
+  {
+   "id": "gan-based-federated-clustering",
+   "label": "GAN-based federated clustering",
+   "type": "method",
+   "description": "Federated clustering that trains generative models locally, builds a global generator, and clusters synthetic data on the server.",
+   "aliases": [
+    "synthetic-data federated clustering"
+   ]
+  },
+  {
+   "id": "secure-federated-clustering",
+   "label": "Secure federated clustering (Lagrange-coded)",
+   "type": "method",
+   "description": "Cryptographic federated clustering in which clients share encrypted or coded distance information (e.g., Lagrange coding) so the server can update centers without seeing data.",
+   "aliases": [
+    "SecFC",
+    "Li et al. 2022"
+   ]
+  },
+  {
+   "id": "federated-clustering",
+   "label": "Federated clustering",
+   "type": "topic",
+   "description": "Clustering data that is spread across clients without centralizing it; clients exchange only summaries such as centers.",
+   "aliases": [
+    "federated data clustering"
+   ]
+  },
+  {
+   "id": "federated-learning",
+   "label": "Federated learning",
+   "type": "topic",
+   "description": "Collaborative model training across many clients that keep their data local and share only model updates.",
+   "aliases": [
+    "FL"
+   ]
+  },
+  {
+   "id": "federated-unsupervised-learning",
+   "label": "Federated unsupervised learning",
+   "type": "topic",
+   "description": "Federated learning in which clients hold no labels at all, e.g., federated clustering or representation learning.",
+   "aliases": [
+    "FedUL"
+   ]
+  },
+  {
+   "id": "federated-semi-supervised-learning",
+   "label": "Federated semi-supervised learning",
+   "type": "topic",
+   "description": "Federated learning with only a small labeled subset at clients, using pseudo-labels, pre-trained annotators or fine-tuning.",
+   "aliases": [
+    "FedSSL"
+   ]
+  },
+  {
+   "id": "personalized-federated-learning",
+   "label": "Personalized federated learning",
+   "type": "topic",
+   "description": "Federated learning that produces client-specific models adapted to each client's local distribution while still benefiting from collaboration.",
+   "aliases": [
+    "PFL"
+   ]
+  },
+  {
+   "id": "personalization",
+   "label": "Personalization",
+   "type": "topic",
+   "description": "Adapting a shared model to an individual user's or client's data distribution.",
+   "aliases": []
+  },
+  {
+   "id": "clustering",
+   "label": "Clustering",
+   "type": "topic",
+   "description": "Unsupervised partitioning of data into groups of similar points.",
+   "aliases": [
+    "cluster analysis"
+   ]
+  },
+  {
+   "id": "k-means-clustering",
+   "label": "k-means clustering",
+   "type": "topic",
+   "description": "Center-based clustering that minimizes the sum of squared Euclidean distances to the nearest of k centers.",
+   "aliases": [
+    "k-means",
+    "(k,2)-clustering"
+   ]
+  },
+  {
+   "id": "k-medoids-clustering",
+   "label": "k-medoids clustering",
+   "type": "topic",
+   "description": "Center-based clustering that minimizes the sum of (L1 or metric) distances to the nearest of k centers, where centers must be data points.",
+   "aliases": [
+    "k-medoid",
+    "k-median",
+    "(k,1)-clustering"
+   ]
+  },
+  {
+   "id": "unsupervised-learning",
+   "label": "Unsupervised learning",
+   "type": "topic",
+   "description": "Learning patterns or structure from unlabeled data.",
+   "aliases": []
+  },
+  {
+   "id": "fairness",
+   "label": "Fairness",
+   "type": "topic",
+   "description": "Requiring that a learning system's outcomes or costs are not unduly unequal across individuals, groups or participants.",
+   "aliases": []
+  },
+  {
+   "id": "client-fairness",
+   "label": "Client fairness",
+   "type": "topic",
+   "description": "In federated learning, uniform performance or cost across participating clients so that no client is systematically disadvantaged.",
+   "aliases": [
+    "performance fairness",
+    "cost fairness across clients"
+   ]
+  },
+  {
+   "id": "fair-clustering",
+   "label": "Fair clustering (group-fair)",
+   "type": "topic",
+   "description": "Clustering under group-fairness constraints such as balanced representation of protected groups in each cluster (e.g., fairlets).",
+   "aliases": [
+    "group fair clustering"
+   ]
+  },
+  {
+   "id": "data-privacy",
+   "label": "Data privacy",
+   "type": "topic",
+   "description": "Protecting individuals' sensitive data from disclosure during collection, training and inference.",
+   "aliases": []
+  },
+  {
+   "id": "machine-unlearning",
+   "label": "Machine unlearning",
+   "type": "topic",
+   "description": "Removing the influence of specific training data from a trained model, ideally without full retraining.",
+   "aliases": []
+  },
+  {
+   "id": "federated-unlearning",
+   "label": "Federated unlearning",
+   "type": "topic",
+   "description": "Machine unlearning in federated systems, e.g., removing a client's or data point's contribution from a global model.",
+   "aliases": []
+  },
+  {
+   "id": "data-heterogeneity",
+   "label": "Data heterogeneity (non-IID)",
+   "type": "problem",
+   "description": "Clients' local data distributions differ, e.g., each client holds only some classes or clusters, often in skewed proportions.",
+   "aliases": [
+    "non-IID data",
+    "skewed data"
+   ]
+  },
+  {
+   "id": "unfairness",
+   "label": "Unfairness (cost deviation across clients)",
+   "type": "problem",
+   "description": "Unequal outcomes across participants or groups. Here: some clients incur much higher clustering cost under the global centers than others.",
+   "aliases": [
+    "high cost deviation"
+   ]
+  },
+  {
+   "id": "center-correspondence-problem",
+   "label": "Center correspondence / ordering problem",
+   "type": "problem",
+   "description": "Cluster centers learned on different clients have no canonical ordering, so they cannot be averaged index-by-index the way neural network weights can.",
+   "aliases": [
+    "lack of chronological ordering on centers",
+    "label switching"
+   ]
+  },
+  {
+   "id": "communication-cost",
+   "label": "Communication cost",
+   "type": "problem",
+   "description": "Bandwidth and number of rounds needed for client-server exchange in distributed or federated training.",
+   "aliases": []
+  },
+  {
+   "id": "client-participation-incentive",
+   "label": "Client participation incentive",
+   "type": "problem",
+   "description": "Clients who gain little or suffer high cost from a federation may drop out, harming collective learning.",
+   "aliases": [
+    "client reluctance",
+    "client dropout incentive"
+   ]
+  },
+  {
+   "id": "label-scarcity",
+   "label": "Label scarcity",
+   "type": "problem",
+   "description": "Most data generated at the edge has no labels because labeling is costly, needs expertise, or users have no incentive to do it.",
+   "aliases": [
+    "unlabelled data"
+   ]
+  },
+  {
+   "id": "privacy-leakage",
+   "label": "Privacy leakage",
+   "type": "problem",
+   "description": "Sensitive information about training data being inferred from shared models, updates or summaries.",
+   "aliases": []
+  },
+  {
+   "id": "poisoning-attack",
+   "label": "Poisoning / malicious clients",
+   "type": "problem",
+   "description": "Adversarial clients or data that corrupt training to degrade or manipulate the learned model.",
+   "aliases": [
+    "malicious clients"
+   ]
+  },
+  {
+   "id": "heterogeneity-level",
+   "label": "Heterogeneity level H",
+   "type": "theory",
+   "description": "Formal parameter for the maximum number of true clusters or distributions present on any single client, H ≤ k.",
+   "aliases": [
+    "H"
+   ]
+  },
+  {
+   "id": "kl-clustering-objective",
+   "label": "(k,ℓ)-clustering objective",
+   "type": "theory",
+   "description": "Family of center-based objectives that sum the ℓ-th power of each point's distance to its assigned center; ℓ=2 gives k-means and ℓ=1 gives k-median/k-medoids.",
+   "aliases": [
+    "ℓ-norm clustering cost"
+   ]
+  },
+  {
+   "id": "fair-federated-clustering-definition",
+   "label": "Fair federated clustering (σ-based)",
+   "type": "theory",
+   "description": "A federated center set is fairer than another if the standard deviation of per-client mean per-point cost is lower.",
+   "aliases": [
+    "Definition 3"
+   ]
+  },
+  {
+   "id": "approximation-guarantee",
+   "label": "Approximation guarantee",
+   "type": "theory",
+   "description": "A provable bound on how far an algorithm's objective value can be from the optimum, e.g., a constant-factor approximation.",
+   "aliases": []
+  },
+  {
+   "id": "convergence-guarantee",
+   "label": "Convergence guarantee",
+   "type": "theory",
+   "description": "A proof that an iterative algorithm converges, possibly with a rate, to a stationary point or optimum.",
+   "aliases": []
+  },
+  {
+   "id": "mean-per-point-cost",
+   "label": "Mean cost per point (µ)",
+   "type": "metric",
+   "description": "Clustering cost normalized by number of points per client, then averaged over clients.",
+   "aliases": [
+    "µ",
+    "per-point objective cost"
+   ]
+  },
+  {
+   "id": "cost-deviation",
+   "label": "Cost deviation per point (σ)",
+   "type": "metric",
+   "description": "Standard deviation across clients of per-client mean per-point clustering cost; a fairness metric.",
+   "aliases": [
+    "σ"
+   ]
+  },
+  {
+   "id": "max-client-cost",
+   "label": "Maximum per-client cost (max)",
+   "type": "metric",
+   "description": "The worst per-point clustering cost over all clients, i.e., a worst-case client fairness metric.",
+   "aliases": [
+    "max"
+   ]
+  },
+  {
+   "id": "k-means-cost",
+   "label": "k-means cost",
+   "type": "metric",
+   "description": "Sum of squared distances from points to their assigned cluster centers.",
+   "aliases": [
+    "clustering objective",
+    "SSE"
+   ]
+  },
+  {
+   "id": "synthetic-gaussian-clusters",
+   "label": "Synthetic Gaussian mixtures (Syn-NO/LO/O)",
+   "type": "dataset",
+   "description": "Synthetic datasets drawn from mixtures of Gaussians with controlled separation or overlap, used to test clustering.",
+   "aliases": [
+    "Syn-NO",
+    "Syn-LO",
+    "Syn-O"
+   ]
+  },
+  {
+   "id": "adult-census",
+   "label": "Adult (UCI Census Income)",
+   "type": "dataset",
+   "description": "Records from the 1994 US census, widely used in fairness and clustering benchmarks.",
+   "aliases": [
+    "Adult"
+   ]
+  },
+  {
+   "id": "bank-marketing",
+   "label": "Bank Marketing (UCI)",
+   "type": "dataset",
+   "description": "Data from a Portuguese bank's direct phone-marketing campaigns, a common clustering and fairness benchmark.",
+   "aliases": [
+    "Bank"
+   ]
+  },
+  {
+   "id": "diabetes-130-us",
+   "label": "Diabetes 130-US Hospitals (UCI)",
+   "type": "dataset",
+   "description": "Ten years of US clinical encounter records for diabetic patients.",
+   "aliases": [
+    "Diabetes"
+   ]
+  },
+  {
+   "id": "fashion-mnist",
+   "label": "Fashion-MNIST",
+   "type": "dataset",
+   "description": "70k grayscale 28x28 images of 10 clothing categories.",
+   "aliases": [
+    "FMNIST"
+   ]
+  },
+  {
+   "id": "femnist",
+   "label": "FEMNIST",
+   "type": "dataset",
+   "description": "LEAF benchmark of handwritten characters partitioned by writer; naturally federated and non-IID (62 classes).",
+   "aliases": [
+    "Federated EMNIST"
+   ]
+  },
+  {
+   "id": "wisdm",
+   "label": "WISDM",
+   "type": "dataset",
+   "description": "Wireless Sensor Data Mining smartphone accelerometer dataset for human activity recognition (6 activities, partitioned by user).",
+   "aliases": [
+    "WISDM activity recognition"
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "source": "gupta2024-ffc",
+   "target": "p-fclus",
+   "relation": "proposes",
+   "note": "Introduces p-FClus as the first personalized federated data clustering algorithm.",
+   "evidence": "\"We propose a novel algorithm called p-FClus (personalized-Federated Clustering)\" (Sec. 4)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "fair-federated-clustering-definition",
+   "relation": "proposes",
+   "note": "Defines fairness of federated center sets through cost deviation σ across clients.",
+   "evidence": "Definition 3 (Fair Federated Clustering), Eq. 4"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "federated-clustering",
+   "relation": "addresses",
+   "note": "Partitions unlabeled data held by many clients into k clusters without exchanging raw data.",
+   "evidence": "Abstract; Sec. 1"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "unfairness",
+   "relation": "addresses",
+   "note": "Targets high cost deviation across clients caused by global centers far from some clients' data.",
+   "evidence": "\"existing models might result in clients suffering high clustering cost\" (Abstract)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "data-heterogeneity",
+   "relation": "addresses",
+   "note": "Aims for performance that does not depend on how data and heterogeneity level H are distributed across clients.",
+   "evidence": "\"independent of the nature of data distribution (or division) among clients\" (Contributions)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "center-correspondence-problem",
+   "relation": "addresses",
+   "note": "Identifies missing center ordering as the obstacle to transferring supervised personalization to clustering.",
+   "evidence": "Sec. 1 challenge (b); Sec. 4.3 Novelty"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "client-participation-incentive",
+   "relation": "motivated_by",
+   "note": "Clients facing high cost may leave the federation, so per-client cost uniformity matters.",
+   "evidence": "\"potential reluctance of clients to contribute to the federated system\" (Sec. 1)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "label-scarcity",
+   "relation": "motivated_by",
+   "note": "Edge data is mostly unlabeled and clients lack incentive or expertise to label it.",
+   "evidence": "Abstract; Sec. 1 (wearables, social media examples)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "data-privacy",
+   "relation": "motivated_by",
+   "note": "Privacy concerns forbid centralizing client data, e.g., banks clustering transactions.",
+   "evidence": "Sec. 1 banking fraud example"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "heterogeneity-level",
+   "relation": "uses",
+   "note": "Uses heterogeneity level H (from k-FED/MFC) to set up experiments with H in {2,5,7,10}.",
+   "evidence": "Definition 1; Sec. 5.1"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "kl-clustering-objective",
+   "relation": "uses",
+   "note": "Formulates local and global cost for any finite ℓ-norm.",
+   "evidence": "Definition 2, Eq. 1"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "ditto",
+   "relation": "builds_on",
+   "note": "Borrows the regularized-personalization idea from supervised personalized FL (Ditto) and adapts it to unsupervised clustering.",
+   "evidence": "\"leveraging the principles of personalization from a supervised setting (Li et al. (2021))\" (Sec. 2)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "k-fed",
+   "relation": "compares_against",
+   "note": "Main one-shot baseline on k-means; it performs much worse on synthetic data and WISDM.",
+   "evidence": "Sec. 5 baselines; Table 1"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "mfc",
+   "relation": "compares_against",
+   "note": "Main multi-shot baseline on k-means; comparable on non-overlapping synthetic data, worse elsewhere.",
+   "evidence": "Sec. 5 baselines; Table 1"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "centralized-clustering",
+   "relation": "compares_against",
+   "note": "Only baseline for the k-medoids variant, since k-FED and MFC are k-means-only.",
+   "evidence": "Sec. 5.5; Tables 2-4"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "synthetic-gaussian-clusters",
+   "relation": "evaluates_on",
+   "note": "Three overlap levels (none, little, overlapping) of 10 bivariate Gaussians.",
+   "evidence": "Sec. 5 Synthetic Datasets; Figs. 3, 6"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "adult-census",
+   "relation": "evaluates_on",
+   "note": "Extrinsic dataset (32,562 records, 5 features) federated by balanced or unequal splits.",
+   "evidence": "Sec. 5 Real-world Datasets; Figs. 1-2, 4-5; Tables 2-3"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "bank-marketing",
+   "relation": "evaluates_on",
+   "note": "Extrinsic dataset (41,108 records, 6 features).",
+   "evidence": "Sec. 5; Tables 2-3"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "diabetes-130-us",
+   "relation": "evaluates_on",
+   "note": "Extrinsic dataset (age, time in hospital) where k-FED and MFC get lower σ but higher variance.",
+   "evidence": "Sec. 5.2.3"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "fashion-mnist",
+   "relation": "evaluates_on",
+   "note": "Extrinsic image dataset (60k training images), run with 500 clients in the balanced setting.",
+   "evidence": "Fig. 1 caption; Sec. 5.2.4"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "femnist",
+   "relation": "evaluates_on",
+   "note": "Intrinsically federated (H=62, 500 clients); p-FClus is best only on max cost.",
+   "evidence": "Table 1; Table 4"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "wisdm",
+   "relation": "evaluates_on",
+   "note": "Intrinsically federated (H=6, 36 clients, ~1.1M samples); p-FClus is clearly best on all three metrics.",
+   "evidence": "Table 1; Table 4"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "mean-per-point-cost",
+   "relation": "measures_with",
+   "note": "Primary cost metric, averaged per client so dataset-size differences do not dominate.",
+   "evidence": "Eqs. 2-3; Sec. 5 metrics"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "cost-deviation",
+   "relation": "measures_with",
+   "note": "Fairness metric: standard deviation of per-client per-point cost.",
+   "evidence": "Eq. 4; Sec. 5 metrics"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "max-client-cost",
+   "relation": "measures_with",
+   "note": "Worst-off client cost, used as a fairness and participation proxy.",
+   "evidence": "\"max = max_z µ^(z)(C)\" (Sec. 5 metrics)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "gan-based-federated-clustering",
+   "relation": "contrasts_with",
+   "note": "Works directly on original data and centers rather than synthetic data from GANs, avoiding heavy client computation.",
+   "evidence": "Sec. 2 (Little et al.; Yan et al.; Chung et al.)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "secure-federated-clustering",
+   "relation": "contrasts_with",
+   "note": "Avoids the encryption overhead of Lagrange-coded secure clustering, at the price of sending plaintext centers.",
+   "evidence": "\"such techniques entail substantial computation overhead and communication costs\" (Sec. 2)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "federated-semi-supervised-learning",
+   "relation": "contrasts_with",
+   "note": "Requires no labeled data at all, unlike FedSSL approaches.",
+   "evidence": "\"does not require a small amount of labelled data\" (Sec. 6)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "federated-unlearning",
+   "relation": "contrasts_with",
+   "note": "Not an unlearning method; lists unlearning in clustering as clients join and leave as future work, citing Pan et al. 2022.",
+   "evidence": "\"analyzing the effects of unlearning in clustering is another promising direction\" (Sec. 6)"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "approximation-guarantee",
+   "relation": "contrasts_with",
+   "note": "Gives no approximation ratio for p-FClus; validation is purely empirical.",
+   "evidence": "No theorem anywhere in Secs. 3-5"
+  },
+  {
+   "source": "gupta2024-ffc",
+   "target": "convergence-guarantee",
+   "relation": "contrasts_with",
+   "note": "Personalization loops 'until tuning steps t or convergence' but convergence is never proved.",
+   "evidence": "Alg. 4 line 2"
+  },
+  {
+   "source": "p-fclus-client-initialization",
+   "target": "p-fclus",
+   "relation": "part_of",
+   "note": "Phase 1: each client computes k local centers C^(z) and uploads them.",
+   "evidence": "Algorithm 2; Sec. 4.1"
+  },
+  {
+   "source": "p-fclus-server-aggregation",
+   "target": "p-fclus",
+   "relation": "part_of",
+   "note": "Phase 2: server clusters S = ∪ C^(z) into k global centers C^g and broadcasts them.",
+   "evidence": "Algorithm 3; Sec. 4.2"
+  },
+  {
+   "source": "p-fclus-client-personalization",
+   "target": "p-fclus",
+   "relation": "part_of",
+   "note": "Phase 3: each client fine-tunes C^g on its local data into personalized centers.",
+   "evidence": "Algorithm 4; Sec. 4.3"
+  },
+  {
+   "source": "personalization-objective",
+   "target": "p-fclus-client-personalization",
+   "relation": "part_of",
+   "note": "P(x) = ½||c^g − x||_ℓ + λ||c^g − c^(z)||² is the loss minimized by the personalization SGD.",
+   "evidence": "Eq. 5"
+  },
+  {
+   "source": "nearest-center-mapping",
+   "target": "p-fclus-client-personalization",
+   "relation": "part_of",
+   "note": "For each x it picks the nearest local and nearest global center to decide which center to update and which anchor to use.",
+   "evidence": "Alg. 4 lines 5-6"
+  },
+  {
+   "source": "count-based-learning-rate",
+   "target": "p-fclus-client-personalization",
+   "relation": "part_of",
+   "note": "η is the inverse of the number of points currently assigned to c^g.",
+   "evidence": "Alg. 4 line 7; text after Eq. 8"
+  },
+  {
+   "source": "medoid-projection",
+   "target": "p-fclus-client-personalization",
+   "relation": "part_of",
+   "note": "For ℓ=1, a personalized center that is not a data point is replaced by the nearest local data point.",
+   "evidence": "Sec. 4.3, paragraph after Eq. 8"
+  },
+  {
+   "source": "p-fclus-client-personalization",
+   "target": "stochastic-gradient-descent",
+   "relation": "uses",
+   "note": "Updates centers point by point with c^g ← c^g − η∇P(x).",
+   "evidence": "Eq. 8; \"Stochastic Gradient Descent (SGD) based personalization\""
+  },
+  {
+   "source": "p-fclus-client-initialization",
+   "target": "lloyds-algorithm",
+   "relation": "uses",
+   "note": "Local k-means (ℓ=2) is solved with Lloyd's heuristic.",
+   "evidence": "Alg. 2 line 1"
+  },
+  {
+   "source": "p-fclus-client-initialization",
+   "target": "k-median-charikar",
+   "relation": "uses",
+   "note": "Local k-medoid (ℓ=1) is solved with Charikar et al.'s algorithm.",
+   "evidence": "Alg. 2 line 1"
+  },
+  {
+   "source": "p-fclus-server-aggregation",
+   "target": "lloyds-algorithm",
+   "relation": "uses",
+   "note": "The server runs k-means on the pooled Z·k local centers when ℓ=2.",
+   "evidence": "Alg. 3 line 3"
+  },
+  {
+   "source": "p-fclus-server-aggregation",
+   "target": "k-median-charikar",
+   "relation": "uses",
+   "note": "The server runs k-medoid on the pooled local centers when ℓ=1.",
+   "evidence": "Alg. 3 line 3"
+  },
+  {
+   "source": "p-fclus-server-aggregation",
+   "target": "farthest-point-heuristic",
+   "relation": "contrasts_with",
+   "note": "Fully re-clusters the pooled centers instead of k-FED's farthest-point selection.",
+   "evidence": "Sec. 2 vs Alg. 3"
+  },
+  {
+   "source": "p-fclus",
+   "target": "federated-clustering",
+   "relation": "is_a",
+   "note": "A single-round federated k-centroid clustering algorithm.",
+   "evidence": "Sec. 4"
+  },
+  {
+   "source": "p-fclus",
+   "target": "personalized-federated-learning",
+   "relation": "is_a",
+   "note": "Produces client-specific personalized center sets instead of one global model.",
+   "evidence": "\"the first attempt to provide personalization in federated data clustering\" (Contributions)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "personalization",
+   "relation": "uses",
+   "note": "Personalization is the mechanism used to lower per-client cost and its deviation.",
+   "evidence": "Sec. 3 end; Sec. 4.3"
+  },
+  {
+   "source": "p-fclus",
+   "target": "unfairness",
+   "relation": "mitigates",
+   "note": "Personalized centers lower σ and max per-client cost in most settings, though not all (e.g., FEMNIST σ).",
+   "evidence": "Sec. 5 Overall Insights; Table 1"
+  },
+  {
+   "source": "p-fclus",
+   "target": "communication-cost",
+   "relation": "mitigates",
+   "note": "Needs only one to-and-fro round (k centers up, k centers down), unlike MFC's multiple rounds.",
+   "evidence": "\"in a single round of communication between server and clients\" (Abstract)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "data-heterogeneity",
+   "relation": "mitigates",
+   "note": "Performance is reported as stable across H levels, splits and client counts, unlike k-FED.",
+   "evidence": "\"p-FClus is not sensitive to changes in heterogeneity levels\" (Sec. 5.2.1)"
+  },
+  {
+   "source": "nearest-center-mapping",
+   "target": "center-correspondence-problem",
+   "relation": "mitigates",
+   "note": "Point-wise nearest-center matching removes the need to align center indices across clients for averaging.",
+   "evidence": "\"we use the data point-wise gradient update and use nearest local or global center mappings\" (Sec. 4.3)"
+  },
+  {
+   "source": "personalization-objective",
+   "target": "ditto",
+   "relation": "builds_on",
+   "note": "Ditto-like L2 proximal regularizer, but anchored to the nearest local center rather than the global model.",
+   "evidence": "Eq. 5; cites Li et al. (2021)"
+  },
+  {
+   "source": "p-fclus-client-personalization",
+   "target": "data-heterogeneity",
+   "relation": "mitigates",
+   "note": "Fine-tuning pulls global centers toward each client's own data, offsetting skewed local distributions.",
+   "evidence": "\"The key factor driving the performance ... is its personalized approach through fine-tuning steps\" (Sec. 5.3)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "k-fed",
+   "relation": "extends",
+   "note": "Keeps k-FED's one-shot 'local centers, then server clustering' structure and adds personalization; it also handles ℓ≠2.",
+   "evidence": "\"captures the benefits of both ... kFED (single shot) and MFC\" (Contributions)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "mfc",
+   "relation": "builds_on",
+   "note": "Aims for MFC's independence from data distribution and its fairness byproduct without multiple rounds; comes from the same IIT Ropar group.",
+   "evidence": "Contributions; Sec. 2"
+  },
+  {
+   "source": "p-fclus",
+   "target": "fedavg",
+   "relation": "contrasts_with",
+   "note": "Does not average parameters, because centers lack the fixed ordering that FedAvg relies on.",
+   "evidence": "Footnotes 2 and 4 (no ordering for direct averaging)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "mufc",
+   "relation": "contrasts_with",
+   "note": "Both pool local centers at a server, but MUFC supports exact removal with secure aggregation while p-FClus has no deletion mechanism or secure aggregation.",
+   "evidence": "Sec. 6 cites Pan et al. (2022) as future work"
+  },
+  {
+   "source": "p-fclus",
+   "target": "k-means-clustering",
+   "relation": "addresses",
+   "note": "The ℓ=2 instance, compared against k-FED and MFC.",
+   "evidence": "Eq. 6; Secs. 5.2-5.4"
+  },
+  {
+   "source": "p-fclus",
+   "target": "k-medoids-clustering",
+   "relation": "addresses",
+   "note": "The ℓ=1 instance, which prior federated clustering baselines do not support.",
+   "evidence": "Eq. 7; Sec. 5.5"
+  },
+  {
+   "source": "p-fclus",
+   "target": "kl-clustering-objective",
+   "relation": "uses",
+   "note": "The algorithm is parameterized by ℓ and works for any finite ℓ-norm objective.",
+   "evidence": "\"works for any finite value of ℓ-norm\" (Contributions)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "privacy-leakage",
+   "relation": "suffers_from",
+   "note": "Our observation: plaintext local centers are sent to the server with no secure aggregation or DP; privacy is argued only informally.",
+   "evidence": "Alg. 2-3 (C^(z) sent directly)"
+  },
+  {
+   "source": "p-fclus",
+   "target": "poisoning-attack",
+   "relation": "suffers_from",
+   "note": "Assumes all clients are benign; robustness to malicious clients is left to future work.",
+   "evidence": "\"the current version of the algorithm assumes that all clients are benign\" (Sec. 6)"
+  },
+  {
+   "source": "medoid-projection",
+   "target": "k-medoids-clustering",
+   "relation": "enables",
+   "note": "Keeps personalized centers valid medoids (actual data points).",
+   "evidence": "Sec. 4.3"
+  },
+  {
+   "source": "k-fed",
+   "target": "federated-clustering",
+   "relation": "is_a",
+   "note": "Earliest one-shot federated k-means baseline.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "k-fed",
+   "target": "awasthi-sheffet-clustering",
+   "relation": "uses",
+   "note": "Runs Awasthi-Sheffet k-means locally on each client.",
+   "evidence": "\"k-FED executes Awasthi locally on each device\" (Sec. 2)"
+  },
+  {
+   "source": "k-fed",
+   "target": "farthest-point-heuristic",
+   "relation": "uses",
+   "note": "The server selects global centers with a farthest heuristic similar to offline k-center.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "k-fed",
+   "target": "data-heterogeneity",
+   "relation": "suffers_from",
+   "note": "Works well only when heterogeneity is high (clusters well separated, few per client).",
+   "evidence": "\"the method works well only when the network has high heterogeneity\" (Sec. 5)"
+  },
+  {
+   "source": "k-fed",
+   "target": "unfairness",
+   "relation": "suffers_from",
+   "note": "Some clients get considerably high clustering cost (high σ and max).",
+   "evidence": "Sec. 2; Table 1 WISDM σ 1.32e13"
+  },
+  {
+   "source": "mfc",
+   "target": "k-fed",
+   "relation": "extends",
+   "note": "Adds multiple light communication rounds that share only the maximum-cost cluster center.",
+   "evidence": "Sec. 2; Sec. 5 baselines"
+  },
+  {
+   "source": "mfc",
+   "target": "federated-clustering",
+   "relation": "is_a",
+   "note": "Multi-shot federated k-means.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "mfc",
+   "target": "communication-cost",
+   "relation": "suffers_from",
+   "note": "Needs multiple rounds, which p-FClus avoids.",
+   "evidence": "\"incorporating multiple rounds of communication\" (Sec. 1)"
+  },
+  {
+   "source": "mfc",
+   "target": "unfairness",
+   "relation": "mitigates",
+   "note": "Achieves some fairness across clients as a byproduct.",
+   "evidence": "\"as a byproduct, MFC achieves a certain level of fairness\" (Sec. 5)"
+  },
+  {
+   "source": "ditto",
+   "target": "personalized-federated-learning",
+   "relation": "is_a",
+   "note": "Canonical supervised personalized FL method referenced as inspiration.",
+   "evidence": "Li et al. (2021), Sec. 2-3"
+  },
+  {
+   "source": "ditto",
+   "target": "client-fairness",
+   "relation": "enables",
+   "note": "Ditto's title links personalization to fairness, which motivates applying personalization for fair clustering.",
+   "evidence": "\"Ditto: Fair and robust federated learning through personalization\" (refs)"
+  },
+  {
+   "source": "personalized-federated-learning",
+   "target": "federated-learning",
+   "relation": "is_a",
+   "note": "A sub-area of FL that outputs client-specific models.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "personalized-federated-learning",
+   "target": "personalization",
+   "relation": "uses",
+   "note": "Applies personalization in the federated setting.",
+   "evidence": "Sec. 3 end"
+  },
+  {
+   "source": "federated-clustering",
+   "target": "federated-unsupervised-learning",
+   "relation": "is_a",
+   "note": "The paper frames clustering as the main tool of FedUL.",
+   "evidence": "\"clustering is one of the powerful tools in FedUL\" (Sec. 1)"
+  },
+  {
+   "source": "federated-clustering",
+   "target": "clustering",
+   "relation": "is_a",
+   "note": "Clustering under the constraint that data stays distributed.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "federated-clustering",
+   "target": "center-correspondence-problem",
+   "relation": "suffers_from",
+   "note": "Centers have no fixed ordering across clients, and a client may not hold all k clusters.",
+   "evidence": "Sec. 1 challenges (a) and (b)"
+  },
+  {
+   "source": "federated-unsupervised-learning",
+   "target": "federated-learning",
+   "relation": "is_a",
+   "note": "FL with no labels at clients.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "federated-unsupervised-learning",
+   "target": "unsupervised-learning",
+   "relation": "is_a",
+   "note": "Unsupervised learning in a federated setting.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "federated-unsupervised-learning",
+   "target": "label-scarcity",
+   "relation": "addresses",
+   "note": "Handles the case where no labeled data is available.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "federated-semi-supervised-learning",
+   "target": "label-scarcity",
+   "relation": "addresses",
+   "note": "Handles limited labels via pseudo-labeling, pre-trained annotators or fine-tuning.",
+   "evidence": "Sec. 1 (FedSSL)"
+  },
+  {
+   "source": "federated-learning",
+   "target": "data-privacy",
+   "relation": "motivated_by",
+   "note": "FL avoids centralizing private edge data.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "fedavg",
+   "target": "federated-learning",
+   "relation": "is_a",
+   "note": "The simplest FL aggregation policy, weighted parameter averaging.",
+   "evidence": "Sec. 1"
+  },
+  {
+   "source": "fedavg",
+   "target": "center-correspondence-problem",
+   "relation": "suffers_from",
+   "note": "Direct averaging of cluster centers fails without a consistent ordering.",
+   "evidence": "\"mapping centers for an averaging function is non-trivial\" (Sec. 1)"
+  },
+  {
+   "source": "k-means-clustering",
+   "target": "clustering",
+   "relation": "is_a",
+   "note": "The ℓ=2 center-based clustering objective.",
+   "evidence": "Definition 2"
+  },
+  {
+   "source": "k-medoids-clustering",
+   "target": "clustering",
+   "relation": "is_a",
+   "note": "The ℓ=1 center-based clustering objective with data-point centers.",
+   "evidence": "Definition 2; Sec. 4.3"
+  },
+  {
+   "source": "lloyds-algorithm",
+   "target": "k-means-clustering",
+   "relation": "addresses",
+   "note": "Standard heuristic for the k-means objective.",
+   "evidence": "Lloyd (1982)"
+  },
+  {
+   "source": "awasthi-sheffet-clustering",
+   "target": "k-means-clustering",
+   "relation": "addresses",
+   "note": "k-means with separation guarantees, used as k-FED's local solver.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "k-median-charikar",
+   "target": "k-medoids-clustering",
+   "relation": "addresses",
+   "note": "Solver used for the ℓ=1 objective locally, at the server and for CentClus.",
+   "evidence": "Alg. 2-3; Sec. 5 baselines"
+  },
+  {
+   "source": "k-median-charikar",
+   "target": "approximation-guarantee",
+   "relation": "enables",
+   "note": "Charikar et al. give a constant-factor k-median approximation, but p-FClus derives no end-to-end bound from it.",
+   "evidence": "\"A constant-factor approximation algorithm for the k-median problem\" (refs)"
+  },
+  {
+   "source": "centralized-clustering",
+   "target": "lloyds-algorithm",
+   "relation": "uses",
+   "note": "CentClus with ℓ=2 is Lloyd's k-means on pooled data.",
+   "evidence": "Sec. 5 baselines"
+  },
+  {
+   "source": "centralized-clustering",
+   "target": "k-median-charikar",
+   "relation": "uses",
+   "note": "CentClus with ℓ=1 is centralized k-medoids; infeasible for WISDM (~8 TB memory).",
+   "evidence": "Sec. 5 baselines; Table 4 caption"
+  },
+  {
+   "source": "client-fairness",
+   "target": "fairness",
+   "relation": "is_a",
+   "note": "Fairness across federated participants rather than across demographic groups.",
+   "evidence": "Sec. 3"
+  },
+  {
+   "source": "fair-federated-clustering-definition",
+   "target": "client-fairness",
+   "relation": "is_a",
+   "note": "Formalizes client fairness in clustering as low dispersion of per-client per-point cost.",
+   "evidence": "Definition 3"
+  },
+  {
+   "source": "cost-deviation",
+   "target": "fair-federated-clustering-definition",
+   "relation": "part_of",
+   "note": "σ is the quantity compared in Definition 3.",
+   "evidence": "Eq. 4"
+  },
+  {
+   "source": "client-fairness",
+   "target": "max-client-cost",
+   "relation": "measures_with",
+   "note": "Worst-client cost captures whether any client is badly served.",
+   "evidence": "\"A lower value indicates a more fairer clustering for clients\" (Sec. 5)"
+  },
+  {
+   "source": "client-fairness",
+   "target": "cost-deviation",
+   "relation": "measures_with",
+   "note": "Dispersion of per-client cost measures how uniform the clustering is across clients.",
+   "evidence": "Sec. 5 metrics"
+  },
+  {
+   "source": "fair-clustering",
+   "target": "fairness",
+   "relation": "is_a",
+   "note": "Group-fair clustering is a fairness sub-area that the authors also work on (Gupta et al. 2023b-d).",
+   "evidence": "Refs: Chierichetti et al. 2017; Bera et al. 2019"
+  },
+  {
+   "source": "fair-clustering",
+   "target": "fair-federated-clustering-definition",
+   "relation": "contrasts_with",
+   "note": "Group-fair clustering constrains protected-group balance per cluster; this paper's notion is cost uniformity across clients.",
+   "evidence": "Def. 3 vs cited fairlet/Bera works"
+  },
+  {
+   "source": "mean-per-point-cost",
+   "target": "k-means-cost",
+   "relation": "is_a",
+   "note": "The k-means (or k-medoid) cost normalized per point per client and averaged over clients.",
+   "evidence": "Eqs. 2-3"
+  },
+  {
+   "source": "mean-per-point-cost",
+   "target": "kl-clustering-objective",
+   "relation": "builds_on",
+   "note": "Derived from L_ℓ^(z) divided by client dataset size.",
+   "evidence": "Eq. 2"
+  },
+  {
+   "source": "data-heterogeneity",
+   "target": "heterogeneity-level",
+   "relation": "measures_with",
+   "note": "H quantifies how many true clusters each client holds.",
+   "evidence": "Definition 1"
+  },
+  {
+   "source": "data-heterogeneity",
+   "target": "unfairness",
+   "relation": "causes",
+   "note": "Skewed non-IID splits make a single global center set far from some clients' data, raising their cost.",
+   "evidence": "\"global centers cannot generalize well, potentially due to non-iid\" (Sec. 1)"
+  },
+  {
+   "source": "unfairness",
+   "target": "client-participation-incentive",
+   "relation": "causes",
+   "note": "High-cost clients may leave the federation.",
+   "evidence": "\"if some clients face high costs, they may lose incentives to stay\" (Sec. 5.3)"
+  },
+  {
+   "source": "mufc",
+   "target": "federated-unlearning",
+   "relation": "is_a",
+   "note": "Exact unlearning for federated clustering, cited by this paper as a future direction.",
+   "evidence": "Pan et al. (2022), Sec. 6"
+  },
+  {
+   "source": "federated-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Machine unlearning specialized to federated systems.",
+   "evidence": "general"
+  },
+  {
+   "source": "gan-based-federated-clustering",
+   "target": "federated-clustering",
+   "relation": "is_a",
+   "note": "Federated clustering via local GANs and global synthetic data.",
+   "evidence": "Sec. 2"
+  },
+  {
+   "source": "secure-federated-clustering",
+   "target": "federated-clustering",
+   "relation": "is_a",
+   "note": "Federated clustering with cryptographic protection of distance information.",
+   "evidence": "Sec. 2 (Li et al. 2022)"
+  },
+  {
+   "source": "secure-federated-clustering",
+   "target": "privacy-leakage",
+   "relation": "mitigates",
+   "note": "Lagrange-coded sharing hides client information from the server.",
+   "evidence": "\"harnesses the advantages of encryption-decryption to safeguard data privacy\" (Sec. 2)"
+  },
+  {
+   "source": "secure-federated-clustering",
+   "target": "communication-cost",
+   "relation": "suffers_from",
+   "note": "Encryption adds substantial computation and communication overhead, hurting scalability.",
+   "evidence": "Sec. 2"
+  }
+ ],
+ "cross_paper": [
+  {
+   "target_paper": "makkar2023-mfc",
+   "relation": "baseline",
+   "note": "MFC is one of the two federated baselines on k-means; p-FClus beats it on µ and max in most settings, but MFC has the best σ on FEMNIST (0.311 vs 0.364).",
+   "explicit": true
+  },
+  {
+   "target_paper": "makkar2023-mfc",
+   "relation": "builds_on",
+   "note": "Same IIT Ropar group: Shweta Jain and Shivam Gupta are co-authors of MFC. p-FClus claims MFC's independence from data distribution in one round instead of many, and turns MFC's fairness byproduct into an explicit goal (σ). Both reuse k-FED's heterogeneity notion H.",
+   "explicit": true
+  },
+  {
+   "target_paper": "pan2023-mufc",
+   "relation": "cites",
+   "note": "Cited (as Pan et al. 2022 arXiv) only in Conclusion as future work: 'analyzing the effects of unlearning in clustering' as clients join and leave. No technical use.",
+   "explicit": true
+  },
+  {
+   "target_paper": "pan2023-mufc",
+   "relation": "complementary",
+   "note": "Both cluster pooled local centers at a server. MUFC adds quantized, securely aggregated local summaries and exact client or point removal, whereas p-FClus adds per-client personalization and a σ fairness metric. Combining them (unlearnable personalized federated clustering) is a natural project.",
+   "explicit": false
+  },
+  {
+   "target_paper": "ginart2019-deletion",
+   "relation": "complementary",
+   "note": "Not cited. Q-k-means (quantized centers stable under deletion) or DC-k-means could replace p-FClus's local and server clustering, so most point deletions leave C^(z) and C^g unchanged and no re-broadcast is needed.",
+   "explicit": false
+  },
+  {
+   "target_paper": "wen2026-fedshard",
+   "relation": "complementary",
+   "note": "Not cited. Both care about client-level fairness in federated systems. FedShard's efficiency and performance fairness for unlearning could be measured with p-FClus's σ and max metrics after client deletion.",
+   "explicit": false
+  },
+  {
+   "target_paper": "kadhe2023-fairsisa",
+   "relation": "contrasts",
+   "note": "Not cited. FairSISA targets group fairness (e.g., equalized odds) under unlearning in supervised LLMs, whereas p-FClus's fairness is uniformity of clustering cost across clients.",
+   "explicit": false
+  },
+  {
+   "target_paper": "bourtoule2021-sisa",
+   "relation": "complementary",
+   "note": "Not cited. Clients act like natural SISA shards: a client's influence on C^g passes only through its k uploaded centers, so client-level retraining is cheap (re-cluster Z·k points). Personalized centers on other clients, however, still need re-tuning.",
+   "explicit": false
+  }
+ ]
+}

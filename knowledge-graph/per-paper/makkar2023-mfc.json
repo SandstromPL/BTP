@@ -1,0 +1,1576 @@
+{
+  "paper": {
+    "id": "makkar2023-mfc",
+    "title": "MFC: A Multishot Approach to Federated Data Clustering",
+    "short": "MFC / MFC_H",
+    "authors": [
+      "Jaglike Makkar",
+      "Bhumika",
+      "Shweta Jain",
+      "Shivam Gupta"
+    ],
+    "affiliations": [
+      "Indian Institute of Technology Ropar, India"
+    ],
+    "venue": "ECAI 2023 (26th European Conference on Artificial Intelligence; Frontiers in Artificial Intelligence and Applications vol. 372, IOS Press, doi:10.3233/FAIA230451)",
+    "year": 2023,
+    "arxiv": null,
+    "file": "papers/3/FAIA-372-FAIA230451.pdf",
+    "one_liner": "Multi-round federated k-means: each client sends its highest-cost local center each round, needs no per-client cluster counts, and works across data regimes.",
+    "summary": "The paper studies federated data clustering: many clients hold private points and want k global k-means centers without sharing raw data. The one-shot method k-FED (Dennis et al., 2021) has each client cluster with its own cluster count k_z and upload centers once. It works only when each client holds few clusters (k_z <= sqrt(k)) and k_z must be known. MFC (Multishot Federated Clustering) instead has each client run Awasthi-Sheffet spectral k-means (SVD projection, approximate seeding, Lloyd steps) with the full k and send all k centers. The server runs Lloyd's algorithm on the pooled centers and broadcasts k global centers. In each later round, clients reassign their points, recompute local means and send only their highest-cost center. The server adds these to its pool and re-clusters. MFC_H sends a single random center at initialization, for lower communication and less disclosure. Under well-separability, local centers lie within c*sqrt(k)*||X-C||_2/sqrt(n_i^(z)) of the optimal global centers, and MFC_H inherits this once there are at least k^2 log k clients. On synthetic Gaussians, Adult and Bank, MFC/MFC_H approach centralized k-means in the homogeneous regime where k-FED fails, match k-FED in the heterogeneous regime, and spread per-device cost more evenly.",
+    "problem": "Existing federated k-means data-clustering methods are either expensive (cryptographic or generative-model approaches) or one-shot methods like k-FED. One-shot methods work only when data is heterogeneous across clients (k_z <= sqrt(k)) and assume each client knows its local cluster count k_z. When clients hold points from many or all clusters (the homogeneous, k_z = k, regime), k-FED's cost blows up, and per-device costs vary widely.",
+    "core_idea": "Do not try to infer k_z. Every client clusters with the full k, and the spurious extra centers that split one true cluster all stay close to that cluster's mean, so the server's clustering of the pooled centers absorbs them. Then spend a few extra communication rounds. In each round every client uploads only its worst-served (maximum-cost) local center, which steers the global centers toward under-represented regions and evens out per-client cost. MFC_H shares just one random center at the start and relies on enough clients (a coupon-collector argument, k^2 log k) so that every Gaussian component is still represented at the server.",
+    "setting": "federated unsupervised clustering (client-server federated k-means data clustering; IID-like homogeneous and non-IID heterogeneous client data)",
+    "unlearning_type": "none (paper is not about unlearning; federated k-means clustering with multi-round communication, no deletion mechanism)",
+    "contributions": [
+      "MFC, a multishot federated k-means algorithm that needs no knowledge of the per-client cluster count k_z and works in both heterogeneous (k_z <= sqrt(k)) and homogeneous (k_z = k) regimes.",
+      "MFC_H, a heuristic variant in which each client shares a single random local center at initialization instead of all k, for communication efficiency and (informally) more privacy.",
+      "Theorem 1: under well-separability and a sufficient-local-cluster-size assumption, every local center from MFC's initial local step lies within c*sqrt(k)*||X-C||_2/sqrt(n^(z)) of the corresponding optimal global center, with c = 50/p' + alpha.",
+      "Lemma 6: with at least k^2 log k clients, MFC_H's first shot puts at least one representative from each Gaussian at the server (coupon-collector argument), so MFC's analysis carries over.",
+      "An informal client-fairness mechanism: uploading the maximum-cost center each round reduces the spread of per-device clustering cost (std and IQR), shown empirically against k-FED.",
+      "Experiments on a synthetic 10-Gaussian dataset, UCI Adult and UCI Bank with 50 clients, against centralized k-means, k-FED and a multishot extension k-FED_M that the authors construct."
+    ],
+    "method_steps": [
+      "Setup: Z clients; client z holds X^(z) in R^d, drawn from k_z <= k of the k global clusters (k_z unknown). Everyone knows the target k (k = 10 in experiments).",
+      "Client init (Algorithm 1, Awasthi-Sheffet local k-means): (a) project local data X^(z) onto the span of its top-k right singular vectors (SVD) to get X_hat; (b) run any standard approximate k-means algorithm on X_hat to get k initial centers; (c) pruning step: for each center r, keep only points at least 3x closer to theta_r than to any other center (||X_hat_i - theta_r|| <= (1/3)||X_hat_i - theta_s|| for all s) and reset theta_r to their mean; (d) run Lloyd steps to convergence. Output k local centers theta^(z) and assignment phi^(z).",
+      "Client init upload: MFC sends all k local centers theta^(z) (k x d floats). MFC_H instead sends ONE randomly chosen local center (d floats).",
+      "Server init: pool S = union over z of the received centers (Z*k centers for MFC, Z for MFC_H); run Lloyd's k-means on S to get k global centers mu = {mu_1..mu_k}; broadcast mu to all clients.",
+      "Client update (each shot): reassign every local point x to its nearest global center, phi^(z)(x) = argmin_j ||x - mu_j||_2; recompute local centers theta^(z) as the means of the assigned points.",
+      "Client upload (each shot): compute each local cluster's cost sum_x I(phi(x)=theta_i)||x - phi(x)||^2 and send only theta_max^(z), the local center with the maximum cost (d floats per client per round).",
+      "Server update (each shot): S <- S union {theta_max^(1), ..., theta_max^(Z)} (the pool keeps growing); re-run Lloyd's k-means on S to get new global centers mu; broadcast mu. (The prose instead says Lloyd runs on 'the previous global centers and theta_max from all clients'; Algorithm 2 says the accumulated S.)",
+      "Repeat the client update, upload and server update for a few rounds until convergence (10 shots plotted in the experiments; no formal stopping rule).",
+      "Device churn: a newly joining or replacement device just downloads mu, computes its own assignments and starts sending its theta_max in later shots. Nothing is described for removing a departed client's past contributions from S."
+    ],
+    "key_definitions": [
+      {
+        "name": "Federated k-means clustering cost (Definition 1)",
+        "plain": "Sum, over all clients and all their points, of the squared distance from each point to the global center it is assigned to.",
+        "formal": "cost(X, mu) = sum_{z in [Z]} sum_{x in X^(z)} sum_{mu_j in mu} I(phi^(z)(x) = mu_j) ||x - mu_j||_2^2"
+      },
+      {
+        "name": "Heterogeneous vs homogeneous regime",
+        "plain": "In the heterogeneous regime every client holds points from only a few clusters, at most sqrt(k) of them. In the homogeneous regime every client holds points from all k clusters. k-FED's guarantees need the heterogeneous regime; MFC is meant to work in both.",
+        "formal": "heterogeneous: k_z <= sqrt(k) for all z in [Z]; homogeneous: k_z = k for all z. In experiments, 'heterogeneity h' means each client gets points from exactly h of the k distributions."
+      },
+      {
+        "name": "Optimal-center matrix C",
+        "plain": "An n x d matrix whose i-th row is the optimal (oracle) cluster mean of point i. ||X - C||_2 (spectral norm) measures how spread the data is around its true centers. C^(z) is the same matrix restricted to client z's points, using local cluster means.",
+        "formal": "C_i = mu(T_{gamma(X_i)}), where T = {T_1..T_k} is the optimal clustering and gamma maps each point to its optimal cluster index"
+      },
+      {
+        "name": "Well-separability (Definition 2, Assumption A2)",
+        "plain": "Every pair of true cluster means is far apart compared with the spectral spread of the data, scaled by cluster sizes.",
+        "formal": "||mu(T_i) - mu(T_j)||_2 >= p * sqrt(k) * ||X - C||_2 * (1/sqrt(n_i) + 1/sqrt(n_j)), with p a large constant"
+      },
+      {
+        "name": "Sufficient local cluster size (Assumption A1)",
+        "plain": "Every non-empty piece of a global cluster that sits on one client has enough points for its sample mean to concentrate around the global cluster mean.",
+        "formal": "n_i^(z) >= (8 sigma_i^2 / epsilon^2) * (ln(1/delta) + 1/4) for all i, with 0 < epsilon < 1 sufficiently small and 0 < delta < 1"
+      },
+      {
+        "name": "Maximum-cost local center theta_max^(z)",
+        "plain": "The local cluster center on client z whose assigned points have the largest total squared distance. It is the only center uploaded after initialization.",
+        "formal": "theta_max^(z) = argmax_{theta_i} sum_{x in X^(z)} I(phi(x) = theta_i) ||x - phi(x)||_2^2"
+      },
+      {
+        "name": "Local-to-global index map beta^(z)",
+        "plain": "Maps each of the k local centers to the closest local cluster mean. Because clients run with the full k even when they hold only k_z < k clusters, several local centers may map to the same true cluster.",
+        "formal": "beta^(z)(r) = argmin_{i in [k]} ||theta_r^(z) - mu(T_i^(z))||_2"
+      },
+      {
+        "name": "gamma (fraction parameter in Lemma 4)",
+        "plain": "A quantity that relates a cluster's local share on one client to its global size. The paper calls it an 'upper bound on the fraction of points on any client' but writes gamma <= n_i^(z)/n_i, which makes it a lower bound (wording inconsistency).",
+        "formal": "gamma = (8 sigma_i^2 / (n_i epsilon^2)) * (ln(1/delta) + 1/4)"
+      }
+    ],
+    "theory": [
+      {
+        "name": "Lemma 1 (Vector Bernstein, Kohler & Lucchi 2017)",
+        "statement_plain": "For independent zero-mean d-dimensional random vectors with bounded norm and bounded second moment, the average exceeds epsilon in norm only with exponentially small probability.",
+        "assumptions": "E[x_i] = 0, ||x_i||_2 <= mu, E[||x_i||^2] <= sigma^2, 0 < epsilon < sigma^2/mu",
+        "significance": "Concentration tool used to show that a client's partial cluster mean is close to the global cluster mean."
+      },
+      {
+        "name": "Lemma 2 (local mean concentration)",
+        "statement_plain": "If client z holds at least (8 sigma_i^2/epsilon^2)(ln(1/delta)+1/4) points of global cluster i, then the mean of those local points is within epsilon of the global cluster mean, with probability at least 1 - delta.",
+        "assumptions": "Assumption A1; sigma_i^2 bounds E||T_ij^(z) - mu(T_i)||^2",
+        "significance": "Links each client's local optimal centers to the global optimal centers."
+      },
+      {
+        "name": "Lemma 3 (Dennis et al. 2021, k-FED)",
+        "statement_plain": "A client's local spectral spread is at most 2 sqrt(k) times the global spread.",
+        "assumptions": "As in the k-FED analysis",
+        "significance": "Lets global separability parameters be converted into local ones. Imported from the one-shot k-FED paper."
+      },
+      {
+        "name": "Lemma 4 (local well-separability)",
+        "statement_plain": "If every pair of global clusters is well separated with constant p, then the local sub-clusters on each client are also well separated with constant p' >= (p sqrt(gamma) - alpha), with probability at least 1 - delta.",
+        "assumptions": "A1, A2, and epsilon <= alpha sqrt(k)||X-C||_2/sqrt(n_max^(z))",
+        "significance": "Needed so that the Awasthi-Sheffet guarantee can be applied locally on each client."
+      },
+      {
+        "name": "Lemma 5 (Awasthi & Sheffet 2012) plus the beta-mapping extension (Eq. 2)",
+        "statement_plain": "If the local sub-clusters are well separated, the centers returned by Algorithm 1 satisfy ||theta_i^(z) - mu(T_i^(z))||_2 <= (25/p') ||X^(z) - C^(z)||_2 / sqrt(n_i^(z)). When a client holds only k_z < k clusters, the extra centers split true clusters, so separability between those duplicates fails. The authors argue (informally, via the CLT, treating duplicate centers as two sample means of the same population) that each duplicate is still close to its mapped cluster mean, which gives Eq. 2 with index beta^(z)(r).",
+        "assumptions": "Local well-separability (Lemma 4); for the k_z < k case an informal CLT argument rather than a proof",
+        "significance": "This is the step that removes the need to know k_z: clients can always run with the full k."
+      },
+      {
+        "name": "Theorem 1 (main theorem, MFC)",
+        "statement_plain": "Assuming well-separability, every local center from MFC's initial step is close to the optimal global center it maps to: ||theta_r^(z) - mu(T_{beta^(z)(r)})||_2 <= c sqrt(k) ||X - C||_2 / sqrt(n^(z)_{beta^(z)(r)}), with c = 50/p' + alpha. Proof: Eq. 2 plus Lemma 3 gives a 50 sqrt(k)/p' term, then the triangle inequality plus Lemma 2 adds epsilon <= alpha-term.",
+        "assumptions": "A1 (enough points per local sub-cluster), A2 (well-separated oracle centers, large p), data from a mixture of k Gaussians",
+        "significance": "Shows that what clients send at shot 0 is a faithful summary of the global optimum regardless of data distribution. It bounds only the initial local centers. The claim that later shots 'only perform a Lloyd's heuristic and thus lower the bound' is not proved, and there is no convergence or approximation-ratio result for the final global centers."
+      },
+      {
+        "name": "Claim 7 (coupon collector problem)",
+        "statement_plain": "The expected number of uniform draws needed to collect all m coupon types is m*H_m, where H_m is the m-th harmonic number (about m ln m).",
+        "assumptions": "Uniform, independent draws",
+        "significance": "Probabilistic tool for the MFC_H client-count bound."
+      },
+      {
+        "name": "Lemma 6 (MFC_H client-count bound)",
+        "statement_plain": "If there are at least k^2 log k devices, then after the first shot at least one point from each Gaussian component is represented at the server. Argument: about k_z log k_z <= k log k devices suffice to cover any one distribution, and summing over the k distributions gives k^2 log k. With this, all of MFC's lemmas apply to MFC_H.",
+        "assumptions": "Each client picks its shared center uniformly at random across its distributions; data is a mixture of k Gaussians. The argument is in expectation (coupon collector), not a high-probability bound, and it switches between 'data points' and 'centers'.",
+        "significance": "Justifies sharing only ONE center per client at initialization: O(k^2 log k) clients are enough for MFC_H to match MFC's guarantee."
+      }
+    ],
+    "complexity": "No formal complexity analysis is given. From the algorithm: MFC sends Z*k*d floats upstream at initialization. Each later shot sends only Z*d floats upstream (one theta_max per client) and k*d floats per client downstream. MFC_H cuts the initial upload to Z*d. The paper calls MFC_H 'much more communication efficient' for large k and many clients but reports no communication measurements. Client compute: one top-k SVD plus approximate k-means plus Lloyd on local data at init, then one assignment and mean step, O(n_z k d), per shot. The server runs Lloyd on the pool S, which grows by Z centers every shot (|S| = Z*k + t*Z for MFC after t shots). One-shot k-FED uses fewer rounds but needs k_z. Unlearning cost is not discussed. By inference from Algorithm 2, removing a client exactly would mean dropping its centers from S at every shot and re-running all shots, because its uploads changed every later global mu and therefore every other client's later theta_max. That is the cost of retraining from scratch, unlike one-shot schemes where only the server aggregation must be redone.",
+    "experiments": {
+      "datasets": [
+        "Synthetic: 10 bivariate Gaussians N_i(mu = 10i, sigma^2 = 2), i = 1..10, 1000 points each (10,000 total); satisfies well-separability",
+        "UCI Adult (1994 census): 32,562 records, 5 features (age, fnlwgt, education_num, capital_gain, hours_per_week)",
+        "UCI Bank Marketing (Portuguese bank): 41,108 records, 6 features (age, duration, campaign, cons.price.idx, euribor3m, nr.employed)"
+      ],
+      "models": [
+        "k-means with k = 10 (no neural models)"
+      ],
+      "baselines": [
+        "Ckmeans: centralized Lloyd's k-means on pooled data (reference lower bound)",
+        "k-FED (Dennis et al., ICML 2021): one-shot method; each client runs Lloyd with its known k_z, the server clusters the union of centers",
+        "k-FED_M: the authors' multishot extension of k-FED (k-FED for shot 1, MFC-like max-cost updates afterwards)"
+      ],
+      "metrics": [
+        "Clustering cost (Definition 1), mean over 10 seeds {0, 100, ..., 900}",
+        "Device-level fairness: mean, standard deviation and inter-quartile range (IQR) of per-device clustering cost",
+        "Setup: 50 clients, k = 10, up to 10 shots; homogeneous regime k_z = k; heterogeneous regime with each client getting points from exactly k_z distributions (the k_z used in the Fig. 1 heterogeneous row is not stated); i5 8th-gen CPU, 8 GB RAM, Python 3.8"
+      ],
+      "headline_results": [
+        "Homogeneous, synthetic (Fig. 1, values read off the plot): one-shot k-FED cost about 125 vs Ckmeans about 79. MFC starts at about 79 and MFC_H at about 84. k-FED_M needs about 2 shots to fall to about 81-83. All multishot methods settle around 84-86, slightly above Ckmeans.",
+        "Homogeneous, Adult (plot): k-FED about 6.15 vs Ckmeans about 4.2. MFC goes from about 4.5 to about 4.25 and MFC_H from about 4.7 to about 4.25 over 10 shots. k-FED_M goes from 6.15 to about 4.4, still with a gap.",
+        "Homogeneous, Bank (plot): k-FED about 1.75 vs Ckmeans about 1.23. MFC about 1.31-1.38, MFC_H about 1.35-1.42, k-FED_M from 1.75 to about 1.41.",
+        "Heterogeneous regime: one-shot k-FED is already near Ckmeans (synthetic about 80; Adult about 4.35 vs 4.2; Bank about 1.245 vs 1.23). MFC's initial cost is close. MFC_H on synthetic starts at about 84.4 and falls to about 80.5.",
+        "Not discussed by the authors (visible in Fig. 1): on heterogeneous Adult and Bank, every multishot method (MFC, MFC_H, k-FED_M) rises after the first shot (Adult about 4.8 to 6.0-6.7; Bank about 1.30 to 1.40-1.45) and ends above one-shot k-FED. The paper describes this as converging to 'akin equivalent cost values'.",
+        "Fig. 2 (synthetic, cost after a single shot vs k_z = 1..10): k-FED is about 125 at k_z=1, lowest (about 80) at k_z=3, and climbs to about 290 at k_z=10. MFC (about 90-100), MFC_H (about 85) and Ckmeans (about 78) stay roughly flat.",
+        "Table 1 (synthetic per-device fairness, k-FED vs MFC): at k_z=1, mean/std/IQR = 149.672/175.013/108.448 for k-FED vs 8.698/2.461/1.965 for MFC; at k_z=10, 182.989/48.496/56.827 vs 85.635/12.553/19.413. MFC has the lower std at every k_z. k-FED has the lower mean per-device cost at k_z = 2, 3, 4 (14.861 vs 16.604; 15.948 vs 24.601; 29.013 vs 30.952) and the lower IQR at k_z=3 (4.036 vs 5.537). MFC_H fairness results were omitted for space ('similar to MFC')."
+      ]
+    },
+    "limitations": [
+      "The privacy claims are informal. MFC_H is 'more private' only because it shares one center instead of k. There is no differential privacy, secure aggregation or formal leakage analysis, and every shot still reveals a raw local center (theta_max), which for small clusters can be close to individual points.",
+      "The theory bounds only the initial local centers (shot 0). The final server-side global centers and the multishot iterations come with no convergence, monotonicity or approximation guarantee, and experiments show cost can increase across shots (heterogeneous Adult/Bank; slightly on synthetic/Bank homogeneous).",
+      "The case where a client holds k_z < k clusters (spurious duplicate centers) is handled by an informal CLT argument, not a proof.",
+      "Lemma 6 (k^2 log k) is an expected-value coupon-collector argument with a loose summation over distributions. It mixes up 'data points' and 'centers' and assumes uniform random selection.",
+      "The results rely on a mixture-of-Gaussians model, well-separability with a large constant p, and a large-sample assumption A1. The authors admit that real data (Adult, Bank) may violate these.",
+      "There are notation inconsistencies: gamma is called an upper bound but defined as a lower bound on the local fraction; Algorithm 2 writes theta_max^(1..k) where it should be (1..Z); and the prose and Algorithm 2 disagree about what the server re-clusters (previous mu plus theta_max vs the accumulated S).",
+      "The server's pool S grows without bound across shots, and the stopping rule ('until convergence') is not specified.",
+      "The evaluation is narrow: three low-dimensional datasets, k=10, 50 clients and a single cost metric. Communication and runtime are not measured, and there is no comparison with Chung et al., SecFC or DP federated clustering. The fairness study covers only synthetic data and MFC vs k-FED.",
+      "The global k must still be known.",
+      "There is no unlearning support. 'Removal of devices' covers only assignment, not erasing a departed client's influence on the global centers."
+    ],
+    "future_work": [
+      "Detailed analysis of fairness notions such as group fairness and individual fairness in federated clustering.",
+      "Adapting the approach to problems such as client selection in federated learning."
+    ],
+    "relevance_to_efficient_unlearning": "MFC is a federated k-means baseline with no deletion mechanism, and it shows exactly where unlearning gets expensive. Its initial shot (local clustering, then server clustering of pooled centers) is a two-level divide-and-conquer tree, the same structure that makes Ginart et al.'s DC-k-means and MUFC's one-shot aggregation cheap to unlearn: delete a point, recompute one client's leaf, then re-cluster at the server. The multishot loop breaks this locality. Every theta_max upload depends on the global centers, which depend on every other client's earlier uploads, and the server pool S keeps them all. So exact client- or point-level unlearning in MFC means retraining all shots from scratch, unless one adds per-shot checkpoints of S and mu (SISA-style) or quantizes the messages (Q-k-means-style) so that most deletions leave the transmitted centers unchanged. The paper therefore gives a clean test case for a research question: how much clustering quality and per-client fairness does multishot interaction buy, and how much deletion efficiency does it cost compared with one-shot MUFC/k-FED? Its device-level fairness metrics (std and IQR of per-client cost) can also be reused to check whether unlearning a client hurts the remaining clients unevenly.",
+    "open_questions": [
+      "Make MFC deletion-efficient. Checkpoint the server pool S and the global centers mu after every shot and quantize theta_max and mu (as in Ginart's Q-k-means). Then prove a bound on the expected number of shots that must be recomputed when one point or one client is deleted.",
+      "Approximate or certified client unlearning for multishot federated clustering. After removing a client's centers from S, how many warm-started shots are needed to get within epsilon (in centers or in cost) of a full retrain? Can Theorem 1-style separability arguments bound that gap?",
+      "Compare one-shot schemes (k-FED, MUFC) with multishot schemes (MFC) on clustering cost, per-client fairness, communication and unlearning time under the same deletion workload, and identify regimes (k_z vs sqrt(k)) where multishot is worth its higher unlearning cost.",
+      "Formal privacy for MFC_H. Add differential-privacy noise or secure aggregation (e.g. MUFC's SCMA) to the per-shot theta_max uploads and quantify the privacy-utility trade-off, since the current 'share one center' argument is informal.",
+      "Prove convergence or monotonicity for MFC's multishot iterations, or explain the cost increases seen on heterogeneous Adult and Bank. Then design a stopping rule and a bounded server pool S, which would also bound the state an unlearning procedure must edit.",
+      "Fairness under unlearning. When a client leaves and its influence is removed, does the per-client cost spread (std/IQR) of the remaining clients get worse? This connects to FedShard's efficiency and performance fairness and to FairSISA."
+    ]
+  },
+  "nodes": [
+    {
+      "id": "mfc",
+      "label": "MFC (Multishot Federated Clustering)",
+      "type": "method",
+      "description": "A multi-round federated k-means algorithm. Clients first send k spectral-k-means local centers, then in each round send only their maximum-cost local center, and the server re-clusters all received centers with Lloyd's algorithm.",
+      "aliases": [
+        "Multishot Federated Clustering",
+        "MFC"
+      ]
+    },
+    {
+      "id": "mfc-h",
+      "label": "MFC_H (heuristic MFC)",
+      "type": "method",
+      "description": "A variant of MFC in which each client shares one random local center at initialization instead of all k, reducing communication and information revealed. It relies on having many clients so that every cluster is still represented.",
+      "aliases": [
+        "MFC_H",
+        "MFCH",
+        "heuristic MFC"
+      ]
+    },
+    {
+      "id": "awasthi-sheffet-local-kmeans",
+      "label": "Awasthi-Sheffet spectral k-means",
+      "type": "method",
+      "description": "A k-means algorithm that projects data onto its top-k singular subspace, seeds with an approximate k-means solution, prunes to points much closer to one center, then runs Lloyd steps. It provably recovers well-separated clusters.",
+      "aliases": [
+        "Algorithm 1 (Local k-means)",
+        "spectral k-means",
+        "Awasthi-Sheffet algorithm"
+      ]
+    },
+    {
+      "id": "svd-projection",
+      "label": "Top-k SVD projection",
+      "type": "method",
+      "description": "Projecting a data matrix onto the subspace spanned by its top-k right singular vectors, a standard denoising step in spectral clustering.",
+      "aliases": [
+        "spectral projection",
+        "singular value decomposition projection"
+      ]
+    },
+    {
+      "id": "lloyds-algorithm",
+      "label": "Lloyd's algorithm",
+      "type": "method",
+      "description": "The standard k-means heuristic that alternates between assigning points to their nearest center and recomputing each center as the mean of its assigned points.",
+      "aliases": [
+        "Lloyd's heuristic",
+        "Llyod k-means",
+        "k-means heuristic"
+      ]
+    },
+    {
+      "id": "k-means-plus-plus",
+      "label": "k-means++",
+      "type": "method",
+      "description": "A randomized seeding method for k-means that picks initial centers with probability proportional to squared distance from the centers already chosen, giving an O(log k) approximation in expectation.",
+      "aliases": [
+        "k-means++ seeding"
+      ]
+    },
+    {
+      "id": "max-cost-center-upload",
+      "label": "Maximum-cost center upload",
+      "type": "method",
+      "description": "A communication rule in which each client, every round, sends only the local cluster center whose assigned points have the highest total squared distance.",
+      "aliases": [
+        "theta_max upload",
+        "highest-cost cluster center sharing"
+      ]
+    },
+    {
+      "id": "server-center-reclustering",
+      "label": "Server re-clustering of pooled centers",
+      "type": "method",
+      "description": "Server-side aggregation in which the received client centers are pooled into a multiset and clustered with k-means to produce k global centers.",
+      "aliases": [
+        "center aggregation",
+        "server-side Lloyd on S"
+      ]
+    },
+    {
+      "id": "single-random-center-init",
+      "label": "Single random center sharing",
+      "type": "method",
+      "description": "An initialization rule in which each client reveals only one randomly chosen local center instead of its full set of k centers.",
+      "aliases": [
+        "one-center initialization"
+      ]
+    },
+    {
+      "id": "multishot-protocol",
+      "label": "Multishot (multi-round) communication",
+      "type": "method",
+      "description": "A federated protocol in which clients and server exchange summaries over several rounds, as opposed to a single one-shot upload.",
+      "aliases": [
+        "multi-shot",
+        "multiple rounds of communication",
+        "iterative refinement"
+      ]
+    },
+    {
+      "id": "k-fed",
+      "label": "k-FED",
+      "type": "method",
+      "description": "A one-shot federated k-means algorithm (Dennis, Li & Smith, ICML 2021). Each client runs Lloyd's algorithm with its own known number of local clusters k_z, sends the centers once, and the server clusters their union into k global centers. It is provably good when data is heterogeneous (k_z <= sqrt(k)).",
+      "aliases": [
+        "kFED",
+        "one-shot federated clustering (Dennis et al.)",
+        "Heterogeneity for the win"
+      ]
+    },
+    {
+      "id": "k-fed-m",
+      "label": "k-FED_M (multishot k-FED)",
+      "type": "method",
+      "description": "The authors' multishot extension of k-FED: k-FED for the first round, then MFC-like maximum-cost center updates in later rounds.",
+      "aliases": [
+        "k-FED_M",
+        "multishot k-FED"
+      ]
+    },
+    {
+      "id": "centralized-k-means",
+      "label": "Centralized k-means (Ckmeans)",
+      "type": "method",
+      "description": "Lloyd's k-means run on all data pooled in one place, used as a non-private reference for federated clustering quality.",
+      "aliases": [
+        "Ckmeans",
+        "centralized Lloyd"
+      ]
+    },
+    {
+      "id": "secfc",
+      "label": "SecFC (Secure Federated Clustering)",
+      "type": "method",
+      "description": "A cryptographic federated clustering protocol in which clients share Lagrange-encoded, secret-shared distance information so the server can run k-means without seeing data, at high computation and communication cost.",
+      "aliases": [
+        "Secure Federated Clustering"
+      ]
+    },
+    {
+      "id": "chung-generative-federated-clustering",
+      "label": "Federated clustering with generative models (Chung et al.)",
+      "type": "method",
+      "description": "A federated unsupervised clustering approach (Chung, Lee & Ramchandran, 2022) that uses generative models and handles IID and non-IID client data, at higher computational cost.",
+      "aliases": [
+        "Federated unsupervised clustering with generative models"
+      ]
+    },
+    {
+      "id": "divide-and-conquer",
+      "label": "Divide-and-conquer clustering",
+      "type": "method",
+      "description": "Clustering by first clustering disjoint data partitions independently and then clustering the resulting partition-level centers, a tree structure that limits recomputation when one partition changes.",
+      "aliases": [
+        "hierarchical aggregation of centers",
+        "DC clustering"
+      ]
+    },
+    {
+      "id": "retrain-from-scratch",
+      "label": "Retrain from scratch",
+      "type": "method",
+      "description": "The naive exact unlearning baseline: discard the model and retrain it on the remaining data after a deletion request.",
+      "aliases": [
+        "naive retraining",
+        "full retraining"
+      ]
+    },
+    {
+      "id": "federated-learning",
+      "label": "Federated learning",
+      "type": "topic",
+      "description": "A distributed learning paradigm in which many clients train a shared model under a central server's coordination while keeping their raw data local.",
+      "aliases": [
+        "FL"
+      ]
+    },
+    {
+      "id": "federated-clustering",
+      "label": "Federated clustering",
+      "type": "topic",
+      "description": "Clustering data points spread across many clients so that the global clustering objective is minimized, without the clients sharing raw data.",
+      "aliases": [
+        "federated data clustering",
+        "FC",
+        "federated k-means"
+      ]
+    },
+    {
+      "id": "one-shot-federated-clustering",
+      "label": "One-shot federated clustering",
+      "type": "topic",
+      "description": "Federated clustering protocols that use a single round of client-to-server communication.",
+      "aliases": [
+        "single-shot federated clustering"
+      ]
+    },
+    {
+      "id": "federated-client-clustering",
+      "label": "Federated client clustering",
+      "type": "topic",
+      "description": "Grouping federated clients, rather than data points, by data similarity, typically to select or personalize clients in supervised federated training.",
+      "aliases": [
+        "clustered federated learning",
+        "client clustering"
+      ]
+    },
+    {
+      "id": "distributed-clustering",
+      "label": "Distributed / parallel clustering",
+      "type": "topic",
+      "description": "Clustering large datasets by partitioning them across machines that process the parts in parallel and combine the results, without privacy constraints on data exchange.",
+      "aliases": [
+        "parallel k-means",
+        "distributed k-means"
+      ]
+    },
+    {
+      "id": "clustering",
+      "label": "Clustering",
+      "type": "topic",
+      "description": "Partitioning data points into groups so that points in the same group are more similar to each other than to points in other groups.",
+      "aliases": [
+        "cluster analysis"
+      ]
+    },
+    {
+      "id": "k-means-clustering",
+      "label": "k-means clustering",
+      "type": "topic",
+      "description": "Center-based clustering that chooses k centers to minimize the sum of squared Euclidean distances from each point to its nearest center.",
+      "aliases": [
+        "k-means",
+        "center-based clustering"
+      ]
+    },
+    {
+      "id": "unsupervised-learning",
+      "label": "Unsupervised learning",
+      "type": "topic",
+      "description": "Learning structure from unlabeled data, for example clustering or density estimation.",
+      "aliases": [
+        "UL"
+      ]
+    },
+    {
+      "id": "data-privacy",
+      "label": "Data privacy",
+      "type": "topic",
+      "description": "Protecting individuals' data from disclosure or misuse during collection, processing and model training.",
+      "aliases": [
+        "privacy preservation"
+      ]
+    },
+    {
+      "id": "differential-privacy",
+      "label": "Differential privacy",
+      "type": "topic",
+      "description": "A formal privacy guarantee that limits how much any single record can change the output distribution of a randomized algorithm.",
+      "aliases": [
+        "DP"
+      ]
+    },
+    {
+      "id": "fairness",
+      "label": "Fairness",
+      "type": "topic",
+      "description": "The study of making machine learning outcomes equitable across individuals, groups or participating clients.",
+      "aliases": [
+        "algorithmic fairness"
+      ]
+    },
+    {
+      "id": "client-fairness",
+      "label": "Client (device-level) fairness",
+      "type": "topic",
+      "description": "In federated settings, the requirement that model quality or loss be spread evenly across participating clients rather than favoring some clients.",
+      "aliases": [
+        "device-level fairness",
+        "performance fairness",
+        "cost fairness across devices"
+      ]
+    },
+    {
+      "id": "machine-unlearning",
+      "label": "Machine unlearning",
+      "type": "topic",
+      "description": "Removing the influence of specific training data from a trained model, ideally matching a model retrained without that data.",
+      "aliases": [
+        "data deletion",
+        "unlearning"
+      ]
+    },
+    {
+      "id": "exact-unlearning",
+      "label": "Exact unlearning",
+      "type": "topic",
+      "description": "Unlearning whose output is distributed identically to retraining from scratch on the remaining data.",
+      "aliases": []
+    },
+    {
+      "id": "federated-unlearning",
+      "label": "Federated unlearning",
+      "type": "topic",
+      "description": "Machine unlearning in federated systems: removing a client's or a sample's contribution from a federated model without centralizing data.",
+      "aliases": [
+        "FU"
+      ]
+    },
+    {
+      "id": "data-heterogeneity",
+      "label": "Data heterogeneity (non-IID clients)",
+      "type": "problem",
+      "description": "Clients hold data from different distributions or different subsets of classes or clusters, which can degrade federated algorithms designed for IID data.",
+      "aliases": [
+        "non-IID data",
+        "statistical heterogeneity"
+      ]
+    },
+    {
+      "id": "unknown-local-cluster-count",
+      "label": "Unknown local cluster count k_z",
+      "type": "problem",
+      "description": "In federated clustering, a client usually does not know how many of the k global clusters its local data covers, yet some methods require this number as input.",
+      "aliases": [
+        "k_z unknown",
+        "prior knowledge of k_z"
+      ]
+    },
+    {
+      "id": "communication-cost",
+      "label": "Communication cost",
+      "type": "problem",
+      "description": "The volume of data and number of rounds exchanged between clients and server, often the bottleneck in federated systems.",
+      "aliases": [
+        "communication overhead"
+      ]
+    },
+    {
+      "id": "privacy-leakage",
+      "label": "Privacy leakage",
+      "type": "problem",
+      "description": "Unintended disclosure of information about private data through shared messages, model updates or outputs.",
+      "aliases": [
+        "information leakage"
+      ]
+    },
+    {
+      "id": "unfairness",
+      "label": "Unfairness",
+      "type": "problem",
+      "description": "Systematically unequal outcomes or losses across individuals, groups or clients.",
+      "aliases": [
+        "cost disparity across devices"
+      ]
+    },
+    {
+      "id": "utility-degradation",
+      "label": "Utility degradation",
+      "type": "problem",
+      "description": "Loss of model quality (higher loss, lower accuracy) caused by a constraint such as privacy, communication limits or unlearning.",
+      "aliases": [
+        "performance drop"
+      ]
+    },
+    {
+      "id": "dynamic-client-participation",
+      "label": "Dynamic client participation (join/leave)",
+      "type": "problem",
+      "description": "Clients join, fail or leave a federated system over time, and the protocol must handle them without full restarts.",
+      "aliases": [
+        "device addition/removal",
+        "client churn",
+        "client dropout"
+      ]
+    },
+    {
+      "id": "unlearning-cost",
+      "label": "Unlearning cost",
+      "type": "problem",
+      "description": "The computation, communication or storage needed to honor a deletion request, compared with the cost of the original training.",
+      "aliases": [
+        "deletion cost"
+      ]
+    },
+    {
+      "id": "well-separability",
+      "label": "Well-separability assumption",
+      "type": "theory",
+      "description": "A clustering assumption that true cluster means are far apart relative to the data's spectral spread around them (scaled by cluster sizes), which makes recovery by spectral or Lloyd-type methods provable.",
+      "aliases": [
+        "center separation",
+        "Kumar-Kannan / Awasthi-Sheffet separation"
+      ]
+    },
+    {
+      "id": "local-cluster-size-assumption",
+      "label": "Sufficient local cluster size (A1)",
+      "type": "theory",
+      "description": "An assumption that every non-empty part of a global cluster on any client has enough points for its sample mean to concentrate around the global mean.",
+      "aliases": [
+        "Assumption A1"
+      ]
+    },
+    {
+      "id": "mixture-of-gaussians",
+      "label": "Mixture-of-Gaussians data model",
+      "type": "theory",
+      "description": "A generative assumption that data points are drawn from a mixture of k Gaussian distributions, each corresponding to one cluster.",
+      "aliases": [
+        "Gaussian mixture model",
+        "GMM data assumption"
+      ]
+    },
+    {
+      "id": "heterogeneity-condition",
+      "label": "Heterogeneity condition k_z <= sqrt(k)",
+      "type": "theory",
+      "description": "A formal notion of a heterogeneous federated clustering network: every client holds points from at most sqrt(k) of the k global clusters.",
+      "aliases": [
+        "heterogeneous regime",
+        "k_z <= sqrt(k)"
+      ]
+    },
+    {
+      "id": "vector-bernstein-inequality",
+      "label": "Vector Bernstein inequality",
+      "type": "theory",
+      "description": "A concentration inequality bounding the probability that the average of independent bounded zero-mean random vectors deviates from zero in norm.",
+      "aliases": [
+        "vector Bernstein lemma"
+      ]
+    },
+    {
+      "id": "local-mean-concentration-lemma",
+      "label": "Local-mean concentration lemma",
+      "type": "theory",
+      "description": "A result that a sufficiently large sample of a cluster held by one party has a mean within epsilon of the full cluster mean with high probability.",
+      "aliases": [
+        "Lemma 2 (MFC)"
+      ]
+    },
+    {
+      "id": "local-spectral-norm-bound",
+      "label": "Local spectral-norm bound (Dennis et al.)",
+      "type": "theory",
+      "description": "A bound relating a client's local spectral deviation ||X^(z) - C^(z)||_2 to the global deviation ||X - C||_2, namely at most 2 sqrt(k) times it.",
+      "aliases": [
+        "Lemma 3 (MFC)",
+        "k-FED spectral bound"
+      ]
+    },
+    {
+      "id": "local-well-separability-lemma",
+      "label": "Local well-separability lemma",
+      "type": "theory",
+      "description": "A result that global well-separability of clusters carries over, with a modified constant, to the sub-clusters held by each client.",
+      "aliases": [
+        "Lemma 4 (MFC)"
+      ]
+    },
+    {
+      "id": "awasthi-sheffet-center-bound",
+      "label": "Awasthi-Sheffet center-recovery bound",
+      "type": "theory",
+      "description": "A guarantee that, for well-separated clusters, spectral k-means returns centers within O(||X - C||_2 / sqrt(n_i)) of the true cluster means.",
+      "aliases": [
+        "Lemma 5 (MFC)",
+        "improved spectral-norm bound"
+      ]
+    },
+    {
+      "id": "mfc-center-closeness-theorem",
+      "label": "MFC center-closeness theorem",
+      "type": "theory",
+      "description": "A bound stating that each client's local center lies within c*sqrt(k)*||X - C||_2 / sqrt(n_i^(z)) of its corresponding optimal global center under well-separability.",
+      "aliases": [
+        "Theorem 1 (MFC)",
+        "main theorem"
+      ]
+    },
+    {
+      "id": "coupon-collector-problem",
+      "label": "Coupon collector problem",
+      "type": "theory",
+      "description": "The classical result that collecting all m equally likely coupon types takes m*H_m (about m ln m) draws in expectation.",
+      "aliases": [
+        "CCP"
+      ]
+    },
+    {
+      "id": "mfc-h-client-count-bound",
+      "label": "MFC_H k^2 log k client bound",
+      "type": "theory",
+      "description": "A result that with at least k^2 log k clients each sharing one center, every Gaussian component is represented at the server after the first round.",
+      "aliases": [
+        "Lemma 6 (MFC)",
+        "O(k^2 log k) clients"
+      ]
+    },
+    {
+      "id": "approximation-guarantee",
+      "label": "Approximation guarantee",
+      "type": "theory",
+      "description": "A provable bound on how far an algorithm's solution (cost or centers) can be from the optimal solution.",
+      "aliases": [
+        "approximation bound"
+      ]
+    },
+    {
+      "id": "synthetic-gaussian-mixture",
+      "label": "Synthetic 10-Gaussian dataset",
+      "type": "dataset",
+      "description": "A synthetic clustering benchmark of ten well-separated bivariate Gaussians N(10i, 2), with 1000 points each (10,000 points in total).",
+      "aliases": [
+        "Synthetic dataset (MFC)"
+      ]
+    },
+    {
+      "id": "adult",
+      "label": "UCI Adult (Census Income)",
+      "type": "dataset",
+      "description": "The 1994 US census dataset of about 32.5k individuals, widely used in clustering and fairness research.",
+      "aliases": [
+        "Adult",
+        "Census Income",
+        "UCI Adult"
+      ]
+    },
+    {
+      "id": "bank-marketing",
+      "label": "UCI Bank Marketing",
+      "type": "dataset",
+      "description": "A Portuguese bank direct-marketing dataset of about 41k customer records, commonly used in fair-clustering benchmarks.",
+      "aliases": [
+        "Bank",
+        "Bank dataset"
+      ]
+    },
+    {
+      "id": "k-means-cost",
+      "label": "k-means clustering cost",
+      "type": "metric",
+      "description": "The sum of squared Euclidean distances from each point to its assigned center; lower is better.",
+      "aliases": [
+        "clustering cost",
+        "k-means objective",
+        "SSE"
+      ]
+    },
+    {
+      "id": "per-device-cost-std",
+      "label": "Std. dev. of per-device cost",
+      "type": "metric",
+      "description": "The standard deviation of the clustering cost across clients, used as a device-level fairness measure; lower means fairer.",
+      "aliases": [
+        "cost standard deviation across clients"
+      ]
+    },
+    {
+      "id": "per-device-cost-iqr",
+      "label": "IQR of per-device cost",
+      "type": "metric",
+      "description": "The inter-quartile range of the clustering cost across clients, a robust device-level fairness measure; lower means fairer.",
+      "aliases": [
+        "inter-quartile range of client cost"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "makkar2023-mfc",
+      "target": "mfc",
+      "relation": "proposes",
+      "note": "Main contribution: a multishot federated k-means algorithm independent of client data distribution and of k_z.",
+      "evidence": "Sec 4, Algorithm 2"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "mfc-h",
+      "relation": "proposes",
+      "note": "Heuristic variant that shares one center per client at initialization for communication and privacy.",
+      "evidence": "Sec 6 'MFC_H: A Heuristic approach'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "federated-clustering",
+      "relation": "addresses",
+      "note": "Targets federated data clustering (clustering points across clients), not client clustering.",
+      "evidence": "Abstract: 'explores the federated data clustering problem'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "data-heterogeneity",
+      "relation": "addresses",
+      "note": "Aims to work in both heterogeneous (k_z <= sqrt(k)) and homogeneous (k_z = k) regimes.",
+      "evidence": "Abstract: 'perform well on both heterogeneous and non-heterogeneous regimes'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "unknown-local-cluster-count",
+      "relation": "addresses",
+      "note": "Unlike k-FED, neither MFC nor MFC_H needs the per-client cluster count k_z.",
+      "evidence": "Abstract: 'do not rely on prior knowledge about k_z'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "unfairness",
+      "relation": "addresses",
+      "note": "Points to large per-device cost fluctuations in k-FED and claims MFC gives more equitable per-device cost.",
+      "evidence": "Sec 1 'Improved Fairness'; Table 1"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "data-privacy",
+      "relation": "motivated_by",
+      "note": "Clients may share only centers, never raw points; data exchange in distributed clustering raises privacy concerns.",
+      "evidence": "Sec 2: 'strong need to develop privacy preserving algorithms'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "mfc-center-closeness-theorem",
+      "relation": "proves",
+      "note": "Theorem 1 bounds the distance of local centers to optimal global centers under well-separability.",
+      "evidence": "Theorem 1, Sec 5.2"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "mfc-h-client-count-bound",
+      "relation": "proves",
+      "note": "Lemma 6: k^2 log k clients ensure each Gaussian is represented at the server after the first shot of MFC_H.",
+      "evidence": "Lemma 6, Sec 6"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "local-mean-concentration-lemma",
+      "relation": "proves",
+      "note": "Lemma 2 is derived from the vector Bernstein inequality.",
+      "evidence": "Lemma 2"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "local-well-separability-lemma",
+      "relation": "proves",
+      "note": "Lemma 4 transfers global separability to per-client sub-clusters with constant p' >= p sqrt(gamma) - alpha.",
+      "evidence": "Lemma 4"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "local-spectral-norm-bound",
+      "relation": "uses",
+      "note": "Imports Lemma 3 from the k-FED analysis to convert the local spectral norm into the global one.",
+      "evidence": "Lemma 3 (Dennis et al. [16])"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "mixture-of-gaussians",
+      "relation": "uses",
+      "note": "The analysis and the synthetic data assume points come from a mixture of k Gaussians.",
+      "evidence": "Sec 3: 'If the data originates from a mixture of k Gaussian'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "synthetic-gaussian-mixture",
+      "relation": "evaluates_on",
+      "note": "Ten bivariate Gaussians, 1000 points each, split across 50 clients.",
+      "evidence": "Sec 7 'Synthetic dataset'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "adult",
+      "relation": "evaluates_on",
+      "note": "32,562 records with 5 numeric features, k = 10, 50 clients.",
+      "evidence": "Sec 7 'Adult'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "bank-marketing",
+      "relation": "evaluates_on",
+      "note": "41,108 records with 6 numeric features, k = 10, 50 clients.",
+      "evidence": "Sec 7 'Bank'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "k-means-cost",
+      "relation": "measures_with",
+      "note": "The main metric is the federated k-means cost (Definition 1) per shot, averaged over 10 seeds.",
+      "evidence": "Sec 7: 'We compare SOTAs on clustering cost'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "per-device-cost-std",
+      "relation": "measures_with",
+      "note": "Fairness is assessed by the std of per-device cost across k_z = 1..10.",
+      "evidence": "Table 1"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "per-device-cost-iqr",
+      "relation": "measures_with",
+      "note": "Fairness is also assessed by the IQR of per-device cost.",
+      "evidence": "Table 1"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "k-fed",
+      "relation": "compares_against",
+      "note": "The main SOTA baseline; one-shot k-FED cost blows up in the homogeneous regime (about 125 vs about 79 on synthetic).",
+      "evidence": "Fig. 1, Fig. 2, Table 1"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "k-fed-m",
+      "relation": "compares_against",
+      "note": "A multishot k-FED built for a fair multi-round comparison; it still leaves a gap to Ckmeans on real data.",
+      "evidence": "Sec 7: 'we extend the single shot k-FED to the multishot scenario'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "centralized-k-means",
+      "relation": "compares_against",
+      "note": "Centralized Lloyd is used as the reference cost that federated methods should approach.",
+      "evidence": "Sec 7 'Centralized k-means (Ckmeans)'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "k-fed",
+      "relation": "builds_on",
+      "note": "Adopts the k-FED setting and its Lemma 3, and extends one-shot center aggregation to multiple shots.",
+      "evidence": "Sec 1; Lemma 3"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "federated-client-clustering",
+      "relation": "contrasts_with",
+      "note": "Distinguishes data clustering (its focus) from clustering clients for supervised FL.",
+      "evidence": "Sec 1: 'our work focuses on data clustering'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "secfc",
+      "relation": "contrasts_with",
+      "note": "Cryptographic SecFC protects privacy but has heavy computation and communication; MFC shares plain centers instead.",
+      "evidence": "Sec 2: 'require significant computation overhead and communication costs'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "differential-privacy",
+      "relation": "contrasts_with",
+      "note": "DP-based federated clustering [32] is described as 'quite different'; MFC gives no formal DP guarantee.",
+      "evidence": "Sec 2: 'draws inspiration from differential privacy which is quite different'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "chung-generative-federated-clustering",
+      "relation": "contrasts_with",
+      "note": "Criticized as distribution-dependent and computationally heavy in some instances.",
+      "evidence": "Sec 1: 'also suffers similar challenges while having high computational complexity'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "distributed-clustering",
+      "relation": "contrasts_with",
+      "note": "Distributed or parallel clustering exchanges data freely; federated clustering adds privacy constraints.",
+      "evidence": "Sec 2 'Distributed Clustering'"
+    },
+    {
+      "source": "makkar2023-mfc",
+      "target": "federated-unlearning",
+      "relation": "contrasts_with",
+      "note": "(Inferred) MFC handles device removal only for assignment and has no mechanism to erase a departed client's influence on global centers.",
+      "evidence": "Sec 1 'Addition/Removal of new devices'"
+    },
+    {
+      "source": "mfc",
+      "target": "federated-clustering",
+      "relation": "is_a",
+      "note": "MFC is a center-sharing federated k-means data-clustering algorithm.",
+      "evidence": "Sec 4"
+    },
+    {
+      "source": "mfc",
+      "target": "k-means-clustering",
+      "relation": "addresses",
+      "note": "Minimizes the k-means cost of all client data with respect to k global centers.",
+      "evidence": "Definition 1"
+    },
+    {
+      "source": "awasthi-sheffet-local-kmeans",
+      "target": "mfc",
+      "relation": "part_of",
+      "note": "Each client runs Algorithm 1 with the full k on its local data at initialization.",
+      "evidence": "Algorithm 2, 'Client initially executes' step 1"
+    },
+    {
+      "source": "server-center-reclustering",
+      "target": "mfc",
+      "relation": "part_of",
+      "note": "The server pools the received centers into S and runs Lloyd's k-means to get k global centers, every shot.",
+      "evidence": "Algorithm 2, Server steps"
+    },
+    {
+      "source": "max-cost-center-upload",
+      "target": "mfc",
+      "relation": "part_of",
+      "note": "After initialization each client uploads only theta_max^(z), its highest-cost local center.",
+      "evidence": "Algorithm 2, Client updates step 4"
+    },
+    {
+      "source": "multishot-protocol",
+      "target": "mfc",
+      "relation": "part_of",
+      "note": "Assignment, upload and re-cluster rounds repeat for a few shots until convergence.",
+      "evidence": "Sec 4: 'repeated for a few rounds until convergence'"
+    },
+    {
+      "source": "svd-projection",
+      "target": "awasthi-sheffet-local-kmeans",
+      "relation": "part_of",
+      "note": "Part 1 projects local data onto the top-k singular vectors before seeding.",
+      "evidence": "Algorithm 1, Part 1"
+    },
+    {
+      "source": "lloyds-algorithm",
+      "target": "awasthi-sheffet-local-kmeans",
+      "relation": "part_of",
+      "note": "Part 3 repeatedly runs Lloyd steps on the projected data until convergence.",
+      "evidence": "Algorithm 1, Part 3"
+    },
+    {
+      "source": "awasthi-sheffet-local-kmeans",
+      "target": "k-means-plus-plus",
+      "relation": "uses",
+      "note": "Part 1 needs 'any standard approximation algorithm for k-means'; k-means++ [2] is one such choice, though the exact choice is unclear from the text.",
+      "evidence": "Algorithm 1, Part 1"
+    },
+    {
+      "source": "server-center-reclustering",
+      "target": "lloyds-algorithm",
+      "relation": "uses",
+      "note": "The server applies Lloyd's k-means to the multiset of received centers.",
+      "evidence": "Algorithm 2: 'Apply Llyod k-means clustering on the S'"
+    },
+    {
+      "source": "mfc",
+      "target": "divide-and-conquer",
+      "relation": "uses",
+      "note": "(Structural reading) The initial shot is two-level divide-and-conquer: local clustering per client, then server clustering of the pooled centers.",
+      "evidence": "Algorithm 2, 'Server initially executes'"
+    },
+    {
+      "source": "single-random-center-init",
+      "target": "mfc-h",
+      "relation": "part_of",
+      "note": "MFC_H's only change: each client shares one random center at initialization instead of all k.",
+      "evidence": "Sec 6: 'only shares one random center with the server'"
+    },
+    {
+      "source": "mfc-h",
+      "target": "mfc",
+      "relation": "extends",
+      "note": "Same multishot protocol and analysis, with a lighter initial handshake.",
+      "evidence": "Sec 6"
+    },
+    {
+      "source": "mfc-h",
+      "target": "communication-cost",
+      "relation": "mitigates",
+      "note": "Sharing one center instead of k cuts the initial upload, claimed to matter for large k and many clients; not measured.",
+      "evidence": "Sec 5.2 end: 'offers communication efficiency'"
+    },
+    {
+      "source": "mfc-h",
+      "target": "privacy-leakage",
+      "relation": "mitigates",
+      "note": "Informal claim: revealing a single center discloses less about local data. No formal privacy guarantee is given.",
+      "evidence": "Abstract: 'only sharing a single cluster center ... ensuring more privacy'"
+    },
+    {
+      "source": "mfc-h",
+      "target": "utility-degradation",
+      "relation": "suffers_from",
+      "note": "Starts with higher cost than MFC (for example about 84 vs 80 on heterogeneous synthetic), closing the gap over shots.",
+      "evidence": "Sec 7.1 Heterogeneous (2)-(3); Fig. 1"
+    },
+    {
+      "source": "mfc-h",
+      "target": "mfc-h-client-count-bound",
+      "relation": "builds_on",
+      "note": "The guarantee for MFC_H requires at least k^2 log k clients.",
+      "evidence": "Lemma 6"
+    },
+    {
+      "source": "mfc",
+      "target": "data-heterogeneity",
+      "relation": "mitigates",
+      "note": "Running with the full k locally plus multishot refinement makes cost largely independent of k_z (flat in Fig. 2).",
+      "evidence": "Fig. 2; Sec 1 'Independent of Data Distribution'"
+    },
+    {
+      "source": "mfc",
+      "target": "unknown-local-cluster-count",
+      "relation": "mitigates",
+      "note": "Clients always cluster with k. Duplicate centers that split one true cluster stay near its mean (beta-mapping argument).",
+      "evidence": "Sec 5.2, discussion after Lemma 5"
+    },
+    {
+      "source": "mfc",
+      "target": "unfairness",
+      "relation": "mitigates",
+      "note": "Sending each client's worst-served center pulls global centers toward it, which lowers the per-device cost std vs k-FED at every k_z.",
+      "evidence": "Table 1; Sec 1 'Improved Fairness'"
+    },
+    {
+      "source": "max-cost-center-upload",
+      "target": "client-fairness",
+      "relation": "enables",
+      "note": "A device with initially high cost gets its worst cluster represented at the server, so costs equalize over shots.",
+      "evidence": "Sec 1: 'sending the maximum-cost cluster center from each device'"
+    },
+    {
+      "source": "mfc",
+      "target": "privacy-leakage",
+      "relation": "mitigates",
+      "note": "Only centers are exchanged (k at init, one per later shot), never raw points; the protection is informal.",
+      "evidence": "Sec 1: 'clients primarily share their local centers'"
+    },
+    {
+      "source": "mfc",
+      "target": "communication-cost",
+      "relation": "suffers_from",
+      "note": "Multiple shots cost more rounds than one-shot k-FED, although each later upload is only one center per client.",
+      "evidence": "Sec 1: 'single-shot method might be more efficient in terms of communication costs'"
+    },
+    {
+      "source": "multishot-protocol",
+      "target": "communication-cost",
+      "relation": "causes",
+      "note": "Each extra shot adds an upload of theta_max and a broadcast of k global centers.",
+      "evidence": "Sec 1 'Multishot Approach'"
+    },
+    {
+      "source": "multishot-protocol",
+      "target": "data-heterogeneity",
+      "relation": "mitigates",
+      "note": "If an initial global center misrepresents a Gaussian, later shots are likely to correct it.",
+      "evidence": "Sec 1: 'high probability of finding a correct representation by using multiple shots'"
+    },
+    {
+      "source": "mfc",
+      "target": "dynamic-client-participation",
+      "relation": "addresses",
+      "note": "New or replacement devices download the global centers and start sending theta_max without involving other devices.",
+      "evidence": "Sec 1 'Addition/Removal of new devices'"
+    },
+    {
+      "source": "mfc",
+      "target": "unlearning-cost",
+      "relation": "suffers_from",
+      "note": "(Inferred) Each client's centers stay in S and shape every later global center and other clients' uploads, so exact deletion means re-running all shots.",
+      "evidence": "Algorithm 2, Server updates: 'Update S = S U {theta_max}'"
+    },
+    {
+      "source": "mfc",
+      "target": "k-fed",
+      "relation": "contrasts_with",
+      "note": "MFC uses the full k locally plus multiple shots; k-FED uses the known k_z and a single shot.",
+      "evidence": "Sec 7 baselines; Abstract"
+    },
+    {
+      "source": "mfc-center-closeness-theorem",
+      "target": "awasthi-sheffet-center-bound",
+      "relation": "builds_on",
+      "note": "Eq. 2 (Lemma 5 via the beta mapping) gives the 25/p' local bound that becomes 50 sqrt(k)/p'.",
+      "evidence": "Theorem 1 proof, Eq. 2-3"
+    },
+    {
+      "source": "mfc-center-closeness-theorem",
+      "target": "local-spectral-norm-bound",
+      "relation": "builds_on",
+      "note": "Lemma 3 replaces ||X^(z) - C^(z)||_2 with 2 sqrt(k)||X - C||_2.",
+      "evidence": "Eq. 3"
+    },
+    {
+      "source": "mfc-center-closeness-theorem",
+      "target": "local-mean-concentration-lemma",
+      "relation": "builds_on",
+      "note": "The triangle inequality adds the epsilon gap between local and global cluster means from Lemma 2.",
+      "evidence": "Theorem 1 proof: 'Using Equation 3 and Lemma 2'"
+    },
+    {
+      "source": "mfc-center-closeness-theorem",
+      "target": "well-separability",
+      "relation": "uses",
+      "note": "Assumption A2: the oracle centers are well separated with a large constant p.",
+      "evidence": "Theorem 1: 'Assuming well separability holds'"
+    },
+    {
+      "source": "mfc-center-closeness-theorem",
+      "target": "local-cluster-size-assumption",
+      "relation": "uses",
+      "note": "Assumption A1 makes every local sub-cluster large enough for mean concentration.",
+      "evidence": "A1, Sec 5.1"
+    },
+    {
+      "source": "mfc-center-closeness-theorem",
+      "target": "approximation-guarantee",
+      "relation": "is_a",
+      "note": "A center-closeness guarantee of order sqrt(k)||X - C||_2/sqrt(n) rather than a cost ratio; it covers only the initial shot.",
+      "evidence": "Theorem 1"
+    },
+    {
+      "source": "local-mean-concentration-lemma",
+      "target": "vector-bernstein-inequality",
+      "relation": "builds_on",
+      "note": "Obtained by setting the Bernstein tail exp(-n eps^2/(8 sigma^2) + 1/4) <= delta.",
+      "evidence": "Lemma 2 proof"
+    },
+    {
+      "source": "local-well-separability-lemma",
+      "target": "local-mean-concentration-lemma",
+      "relation": "builds_on",
+      "note": "Local means move at most epsilon, so separation shrinks by at most 2 epsilon.",
+      "evidence": "Lemma 4 proof, Eq. 1"
+    },
+    {
+      "source": "local-well-separability-lemma",
+      "target": "well-separability",
+      "relation": "builds_on",
+      "note": "Starts from global separability and rescales it with gamma and alpha.",
+      "evidence": "Lemma 4"
+    },
+    {
+      "source": "local-well-separability-lemma",
+      "target": "awasthi-sheffet-center-bound",
+      "relation": "enables",
+      "note": "Lemma 5 needs local sub-clusters to be well separated, which Lemma 4 provides.",
+      "evidence": "Lemma 5: 'If each pair of local subsets of clusters are well separated'"
+    },
+    {
+      "source": "awasthi-sheffet-local-kmeans",
+      "target": "awasthi-sheffet-center-bound",
+      "relation": "enables",
+      "note": "Running Algorithm 1 on well-separated data yields centers within (25/p')||X^(z) - C^(z)||/sqrt(n_i^(z)).",
+      "evidence": "Lemma 5 (Awasthi-Sheffet [3])"
+    },
+    {
+      "source": "local-spectral-norm-bound",
+      "target": "k-fed",
+      "relation": "part_of",
+      "note": "Lemma 3 comes from the k-FED analysis of Dennis et al.",
+      "evidence": "Lemma 3 (Dennis et al. [16])"
+    },
+    {
+      "source": "mfc-h-client-count-bound",
+      "target": "coupon-collector-problem",
+      "relation": "uses",
+      "note": "Treats Gaussians as coupon types: k_z log k_z <= k log k devices per distribution, summed to k^2 log k.",
+      "evidence": "Claim 7; Lemma 6 proof"
+    },
+    {
+      "source": "mfc-h-client-count-bound",
+      "target": "mixture-of-gaussians",
+      "relation": "uses",
+      "note": "Coverage is stated as each Gaussian component having a representative at the server.",
+      "evidence": "Lemma 6"
+    },
+    {
+      "source": "mfc-h-client-count-bound",
+      "target": "mfc-center-closeness-theorem",
+      "relation": "enables",
+      "note": "Once every Gaussian is represented, 'all the lemmas hold valid as in MFC' for MFC_H.",
+      "evidence": "Sec 6: 'With this bound, all the lemmas hold valid'"
+    },
+    {
+      "source": "k-fed",
+      "target": "one-shot-federated-clustering",
+      "relation": "is_a",
+      "note": "Clients upload local centers once and the server clusters them; no further rounds.",
+      "evidence": "Sec 1: 'computes the final clustering in only one round'"
+    },
+    {
+      "source": "k-fed",
+      "target": "lloyds-algorithm",
+      "relation": "uses",
+      "note": "Each client runs Lloyd with k_z clusters, and the server clusters the union.",
+      "evidence": "Sec 7 baseline description of k-FED"
+    },
+    {
+      "source": "k-fed",
+      "target": "heterogeneity-condition",
+      "relation": "uses",
+      "note": "Effective only in the heterogeneous regime k_z <= sqrt(k); one-shot cost rises steeply as k_z approaches k.",
+      "evidence": "Abstract; Fig. 2"
+    },
+    {
+      "source": "k-fed",
+      "target": "unknown-local-cluster-count",
+      "relation": "suffers_from",
+      "note": "Needs k_z on every client to choose its local number of clusters.",
+      "evidence": "Sec 7: 'The method assumes the knowledge of k_z on each client'"
+    },
+    {
+      "source": "k-fed",
+      "target": "data-heterogeneity",
+      "relation": "suffers_from",
+      "note": "Performance depends heavily on how data is distributed: good when heterogeneous, poor when homogeneous.",
+      "evidence": "Sec 1: 'highly dependent on the data distribution across clients'"
+    },
+    {
+      "source": "k-fed",
+      "target": "unfairness",
+      "relation": "suffers_from",
+      "note": "Per-device cost std up to 175 (k_z=1) vs 2.46 for MFC.",
+      "evidence": "Table 1"
+    },
+    {
+      "source": "k-fed-m",
+      "target": "k-fed",
+      "relation": "extends",
+      "note": "Runs k-FED for shot 1, then MFC-like rounds.",
+      "evidence": "Sec 7 'k-FED_M'"
+    },
+    {
+      "source": "k-fed-m",
+      "target": "multishot-protocol",
+      "relation": "uses",
+      "note": "Later shots 'employ a technique akin to our MFC'.",
+      "evidence": "Sec 7 'k-FED_M'"
+    },
+    {
+      "source": "k-fed-m",
+      "target": "data-heterogeneity",
+      "relation": "suffers_from",
+      "note": "Its single-shot cost is low only for small k_z and climbs to about 290 at k_z=10.",
+      "evidence": "Fig. 2; Sec 7.3"
+    },
+    {
+      "source": "heterogeneity-condition",
+      "target": "data-heterogeneity",
+      "relation": "part_of",
+      "note": "Formalizes the 'heterogeneous' regime of client data distribution used in federated clustering.",
+      "evidence": "Sec 3: 'heterogeneous if ... k_z <= sqrt(k)'"
+    },
+    {
+      "source": "centralized-k-means",
+      "target": "lloyds-algorithm",
+      "relation": "uses",
+      "note": "Ckmeans is Lloyd's heuristic on the pooled data.",
+      "evidence": "Sec 7 'Centralized k-means'"
+    },
+    {
+      "source": "centralized-k-means",
+      "target": "k-means-clustering",
+      "relation": "is_a",
+      "note": "Non-federated k-means used as the reference cost.",
+      "evidence": "Sec 7"
+    },
+    {
+      "source": "lloyds-algorithm",
+      "target": "k-means-clustering",
+      "relation": "is_a",
+      "note": "The standard local-search heuristic for the k-means objective.",
+      "evidence": "Sec 2 'Centralized Clustering'"
+    },
+    {
+      "source": "k-means-clustering",
+      "target": "clustering",
+      "relation": "is_a",
+      "note": "Center-based clustering with an L2 objective, chosen for its efficiency and scalability.",
+      "evidence": "Sec 2: 'for k-means L2 norm'"
+    },
+    {
+      "source": "k-means-clustering",
+      "target": "k-means-cost",
+      "relation": "measures_with",
+      "note": "The k-means objective is the sum of squared distances to the assigned centers.",
+      "evidence": "Definition 1"
+    },
+    {
+      "source": "clustering",
+      "target": "unsupervised-learning",
+      "relation": "is_a",
+      "note": "Clustering is presented as a core paradigm of unsupervised learning.",
+      "evidence": "Sec 2: 'Clustering is one of the powerful UL paradigms'"
+    },
+    {
+      "source": "federated-clustering",
+      "target": "clustering",
+      "relation": "is_a",
+      "note": "Clustering under federated privacy and communication constraints.",
+      "evidence": "Sec 2 'Federated Data Clustering'"
+    },
+    {
+      "source": "federated-clustering",
+      "target": "federated-learning",
+      "relation": "part_of",
+      "note": "The unsupervised branch of federated learning that the paper targets.",
+      "evidence": "Sec 1: 'we focus on unsupervised learning in federated setting'"
+    },
+    {
+      "source": "one-shot-federated-clustering",
+      "target": "federated-clustering",
+      "relation": "is_a",
+      "note": "Federated clustering restricted to one communication round.",
+      "evidence": "Abstract: 'existing one-shot approaches'"
+    },
+    {
+      "source": "federated-client-clustering",
+      "target": "federated-learning",
+      "relation": "part_of",
+      "note": "Clustering clients to improve supervised federated training.",
+      "evidence": "Sec 2 'Federated Client Clustering'"
+    },
+    {
+      "source": "distributed-clustering",
+      "target": "clustering",
+      "relation": "is_a",
+      "note": "Parallel or distributed implementations of k-means, k-medoids, hierarchical clustering and DBSCAN.",
+      "evidence": "Sec 2 'Distributed Clustering'"
+    },
+    {
+      "source": "secfc",
+      "target": "federated-clustering",
+      "relation": "is_a",
+      "note": "Privacy-preserving federated clustering via Lagrange-encoded distance vectors.",
+      "evidence": "Sec 2: 'In SecFC [31], the clients ... share encrypted distance vectors'"
+    },
+    {
+      "source": "secfc",
+      "target": "communication-cost",
+      "relation": "suffers_from",
+      "note": "Encryption and distance-vector sharing add heavy computation and communication and hurt scalability.",
+      "evidence": "Sec 2"
+    },
+    {
+      "source": "chung-generative-federated-clustering",
+      "target": "federated-clustering",
+      "relation": "is_a",
+      "note": "Handles IID and non-IID data with generative models.",
+      "evidence": "Sec 2: '[13] can handle both IID ... and non-IID data'"
+    },
+    {
+      "source": "chung-generative-federated-clustering",
+      "target": "data-heterogeneity",
+      "relation": "suffers_from",
+      "note": "Performance still depends heavily on the client data distribution, according to the authors.",
+      "evidence": "Sec 2: 'clustering performance heavily depends on the data distribution'"
+    },
+    {
+      "source": "federated-learning",
+      "target": "data-privacy",
+      "relation": "motivated_by",
+      "note": "Clients train jointly without sharing sensitive data, only updates.",
+      "evidence": "Sec 1"
+    },
+    {
+      "source": "differential-privacy",
+      "target": "data-privacy",
+      "relation": "part_of",
+      "note": "A formal route to privacy that MFC does not adopt.",
+      "evidence": "Sec 2 ref [32]"
+    },
+    {
+      "source": "client-fairness",
+      "target": "fairness",
+      "relation": "is_a",
+      "note": "Fairness defined as similar loss across federated clients.",
+      "evidence": "Sec 7.3 'Ablation Study on Fairness'"
+    },
+    {
+      "source": "client-fairness",
+      "target": "unfairness",
+      "relation": "mitigates",
+      "note": "Equalizing per-device cost counters clients finding the global centers unfair.",
+      "evidence": "Sec 7.3: 'some clients may find the global centers unfair'"
+    },
+    {
+      "source": "client-fairness",
+      "target": "per-device-cost-std",
+      "relation": "measures_with",
+      "note": "Higher std of per-device cost means lower fairness.",
+      "evidence": "Sec 7.3"
+    },
+    {
+      "source": "client-fairness",
+      "target": "per-device-cost-iqr",
+      "relation": "measures_with",
+      "note": "Higher IQR of per-device cost means lower fairness.",
+      "evidence": "Sec 7.3"
+    },
+    {
+      "source": "per-device-cost-std",
+      "target": "k-means-cost",
+      "relation": "uses",
+      "note": "Computed over the per-client k-means costs.",
+      "evidence": "Table 1"
+    },
+    {
+      "source": "per-device-cost-iqr",
+      "target": "k-means-cost",
+      "relation": "uses",
+      "note": "Computed over the per-client k-means costs.",
+      "evidence": "Table 1"
+    },
+    {
+      "source": "synthetic-gaussian-mixture",
+      "target": "mixture-of-gaussians",
+      "relation": "builds_on",
+      "note": "Ten bivariate Gaussians N(10i, 2) that satisfy the well-separability assumption.",
+      "evidence": "Sec 7: 'The dataset obeys our well-separability assumption'"
+    },
+    {
+      "source": "federated-unlearning",
+      "target": "machine-unlearning",
+      "relation": "is_a",
+      "note": "Context for the bridge: unlearning in federated systems such as MFC.",
+      "evidence": "Not in paper; general definition"
+    },
+    {
+      "source": "exact-unlearning",
+      "target": "machine-unlearning",
+      "relation": "is_a",
+      "note": "Context for the bridge: the gold standard MFC would need retraining to meet.",
+      "evidence": "Not in paper; general definition"
+    },
+    {
+      "source": "retrain-from-scratch",
+      "target": "exact-unlearning",
+      "relation": "is_a",
+      "note": "The only exact deletion route available for MFC as published (inferred).",
+      "evidence": "Inferred from Algorithm 2"
+    },
+    {
+      "source": "retrain-from-scratch",
+      "target": "unlearning-cost",
+      "relation": "causes",
+      "note": "For MFC this means repeating local spectral k-means and all shots for every remaining client (inferred).",
+      "evidence": "Inferred from Algorithm 2"
+    },
+    {
+      "source": "divide-and-conquer",
+      "target": "unlearning-cost",
+      "relation": "mitigates",
+      "note": "Tree-structured aggregation lets a deletion recompute only one leaf and the root, but MFC's multishot coupling negates this (inferred).",
+      "evidence": "Inferred; cf. DC-k-means (Ginart et al.)"
+    }
+  ],
+  "cross_paper": [
+    {
+      "target_paper": "pan2023-mufc",
+      "relation": "same_problem",
+      "note": "Both do federated k-means data clustering and both build on k-FED (Dennis et al.). MUFC is one-shot with secure compressed aggregation and supports client/data unlearning; MFC is multishot with no unlearning, so a removal would force all shots to be re-run.",
+      "explicit": false
+    },
+    {
+      "target_paper": "ginart2019-deletion",
+      "relation": "complementary",
+      "note": "Q-k-means (quantization) and DC-k-means (divide-and-conquer tree) give deletion-efficient k-means. MFC's initial shot has a DC-tree shape with clients as leaves, but its multishot loop couples all leaves; quantizing theta_max and mu is a natural way to make MFC deletion-efficient.",
+      "explicit": false
+    },
+    {
+      "target_paper": "gupta2024-ffc",
+      "relation": "same_problem",
+      "note": "Both are federated data clustering from what appears to be the same IIT Ropar group (Shivam Gupta, Shweta Jain). MFC's device-level cost fairness and its stated future work on fairness lead directly into fair federated clustering via personalization.",
+      "explicit": false
+    },
+    {
+      "target_paper": "bourtoule2021-sisa",
+      "relation": "complementary",
+      "note": "SISA-style checkpointing (store S and mu after every shot) and client sharding could limit retraining after a deletion in MFC to the rounds after a client's first contribution.",
+      "explicit": false
+    },
+    {
+      "target_paper": "wen2026-fedshard",
+      "relation": "complementary",
+      "note": "FedShard targets federated unlearning with efficiency and performance fairness. MFC's per-device cost std/IQR is a clustering analogue of performance fairness and could be used to check whether unlearning in federated clustering is fair.",
+      "explicit": false
+    }
+  ]
+}

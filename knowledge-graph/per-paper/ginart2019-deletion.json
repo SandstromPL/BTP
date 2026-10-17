@@ -1,0 +1,1810 @@
+{
+ "paper": {
+  "id": "ginart2019-deletion",
+  "title": "Making AI Forget You: Data Deletion in Machine Learning",
+  "short": "Making AI Forget You (Q-k-means / DC-k-means)",
+  "authors": [
+   "Antonio A. Ginart",
+   "Melody Y. Guan",
+   "Gregory Valiant",
+   "James Zou"
+  ],
+  "affiliations": [
+   "Stanford University, Dept. of Electrical Engineering",
+   "Stanford University, Dept. of Computer Science",
+   "Stanford University, Dept. of Biomedical Data Science"
+  ],
+  "venue": "NeurIPS 2019 (33rd Conference on Neural Information Processing Systems)",
+  "year": 2019,
+  "arxiv": "1907.05012",
+  "file": "papers/3/1907.05012.pdf",
+  "one_liner": "Defines exact data deletion as distributional equality with retraining, measures it by amortized runtime, and gives two provably deletion-efficient k-means algorithms.",
+  "summary": "Laws such as the GDPR's right to be forgotten let people withdraw their data, but a trained model still carries what it learned from it. Retraining from scratch on the remaining data always works, but it is expensive. This paper treats data deletion in machine learning as a computational problem. A deletion operation is exact if the updated model has exactly the same probability distribution as a model retrained without the point, which also covers randomized learners. Deletion is framed as an online problem: after training on n points, m deletion requests arrive one at a time. Efficiency is the amortized runtime per request, which can be no better than Omega(n/m). The paper proposes four design principles for deletion-friendly learners: linearity, laziness, modularity and quantization. It then builds two exact deletion algorithms for k-means. Q-k-means rounds the centroids to a randomly shifted grid at every Lloyd iteration. Removing a few points then almost never changes the rounded centroids, so most deletions need only a cheap check against stored metadata. DC-k-means splits the data at random into w leaf sub-problems and merges their centroids at a root, so a deletion recomputes only one leaf and the root. Both come with runtime and quality guarantees. On six datasets they average more than 100x faster than retraining, with similar clustering quality.",
+  "problem": "When a user withdraws consent, the deployed model should become independent of that user's data, as if it had never been trained on it. For most models the only known way to do this is full retraining, which is too costly when deletion requests keep arriving. Before this work there was no definition of deletion for stochastic learning algorithms and no notion of asymptotic deletion efficiency or its trade-offs.",
+  "core_idea": "Exact deletion means the updated model is equal in distribution to the retrained model. Its efficiency is the amortized time over a stream of deletions, measured against an Omega(n/m) lower bound. To make deletion cheap, design the learner so its output depends on the data in a controlled way. Q-k-means quantizes the centroids so that small changes to the data almost never change the model, which can be checked from stored metadata. DC-k-means splits the computation into modules so that a deletion only touches one small sub-problem plus the root.",
+  "setting": "Centralized unsupervised clustering (k-means). One model and one database, one data point per deletion request, and a stream of deletion requests that arrives online after training.",
+  "unlearning_type": "exact",
+  "contributions": [
+   "A formal definition of a data deletion operation for possibly randomized learning algorithms: R_A(D, A(D), i) must equal A(D_{-i}) in distribution. The appendix adds a robust (adversarial) variant and a delta-approximate relaxation, and discusses how they relate to differential privacy.",
+   "An online data deletion model in which m deletion requests are processed one at a time and cost is the amortized runtime. This gives an Omega(n/m) lower bound and the notion of alpha-deletion efficiency (amortized O(n^{1-alpha}) when m = Theta(n^alpha)).",
+   "Q-k-means, a quantized Lloyd's algorithm. It uses a random-phase epsilon-lattice, memoized metadata, a gamma-balance correction and a loss-based early stop. m deletions take expected time O(m^2 d^{5/2} / epsilon), which does not depend on n for fixed m and epsilon. Its expected loss is bounded relative to k-means++.",
+   "DC-k-means, a w-ary divide-and-conquer k-means with uniform random leaf assignment. With a depth-1 tree and w = Theta(n^rho), m deletions take expected time O(m * max{n^rho, n^{1-rho}} * d).",
+   "Conditions for alpha-deletion efficiency. Q-k-means with epsilon = Theta(n^{-beta}) needs alpha <= (1-beta)/2. DC-k-means needs alpha <= 1 - max{rho, 1-rho}, which is at most 1/2.",
+   "Experiments on 6 datasets: amortized runtime (train once plus 1,000 deletions) averages over 100x speedup against k-means++/Lloyd's retraining, with comparable loss ratio, silhouette and NMI.",
+   "Four engineering principles for deletion-efficient learning (linearity, laziness, modularity, quantization), and a discussion of how to apply them to segmented regression, random-feature kernel regression, decision trees and random forests, and DNNs trained with SGD.",
+   "Open-source Python code: github.com/tginart/deletion-efficient-kmeans."
+  ],
+  "method_steps": [
+   "[Preprocessing] Min-max scale the data into the unit hypercube [0,1]^d; MNIST is already scaled. The theory assumes data in [0,1]^d or a bounded radius.",
+   "[Q-k-means train 1] Initialize k centroids with k-means++ and save them as metadata. Compute the initial partition pi and the loss L.",
+   "[Q-k-means train 2] For tau = 1..T (T = 10 in experiments), store the previous centroids c' and compute the analog centroids c as the means of the current partition.",
+   "[Q-k-means train 3] Balance correction: for any cluster with |pi_k| < gamma*n/k (gamma = 0.2), replace its centroid with a mass-weighted average of the current centroid (weight |pi_k|) and the previous centroid c'_k (weight gamma*n/k - |pi_k|). In effect the small cluster is padded with mass at the old centroid so it cannot move too much.",
+   "[Q-k-means train 4] Draw a fresh random phase theta ~ Unif[-1/2, 1/2]^d and quantize each centroid to the nearest vertex of the shifted epsilon-lattice: Q(x) = epsilon*(theta + argmin_{j in Z^d} ||x - epsilon*(theta + j)||).",
+   "[Q-k-means train 5] Reassign points to the nearest quantized centroid. Save (c, theta, c_hat, cluster sizes) to metadata, an extra O(kTd) memory. Compute the new loss L'. If L' < L, accept the step; otherwise stop early, because quantization means a step can increase the loss. Output the quantized centroids.",
+   "[Q-k-means delete] For a point p: if p is one of the k-means++ initial centroids, retrain from scratch. Otherwise, for each stored iteration, find p's cluster, compute that cluster's centroid without p (linearity: subtract p's contribution from the mean), apply the gamma-correction, and re-quantize with the same stored phase theta. If any quantized centroid changes, retrain from scratch. Otherwise update the stored analog centroids and counts and return the unchanged model. The check costs O(kTd) per deletion.",
+   "[DC-k-means train 1] Build a perfect w-ary tree of height h. Experiments use depth 1 with w ~ n^0.3 rounded to the nearest power of 2. Assign each point to a leaf independently and uniformly at random (a multinomial partition).",
+   "[DC-k-means train 2] At each leaf, run k-means++ seeding plus T Lloyd iterations to get k centroids. Pass these centroids up as data for the parent. The root dataset has k*w points. Run k-means at the root and output the root centroids. Save all nodes (leaf datasets and centroids) as metadata.",
+   "[DC-k-means delete] Find p's leaf and remove p. Re-solve that leaf's k-means, replace its old centroids in the parent's dataset, re-solve each node up to the root, and return the new root centroids. The number of leaves is held fixed by rounding to a power of 2; if a deletion changes the rounding, retrain from scratch.",
+   "[Online deletion benchmark] Train once on the full dataset, then process 1,000 deletions chosen uniformly at random without replacement, producing a valid model after each. Report the wall-clock time of training plus all deletions divided by 1,000. The baseline handles each deletion by retraining k-means++ plus Lloyd's."
+  ],
+  "key_definitions": [
+   {
+    "name": "Learning algorithm (Def. A.1)",
+    "plain": "A possibly randomized algorithm that maps a dataset to a model plus arbitrary metadata, such as stored partial computations used later for deletions. It must touch every data point at least once and runs sequentially, so it takes Omega(n) time.",
+    "formal": "A: D -> H x M, randomized; runtime Omega(n)"
+   },
+   {
+    "name": "Data deletion operation (Def. 3.1 / A.2)",
+    "plain": "A procedure that takes the dataset, the trained model (with metadata) and an index i, and returns a model with exactly the same distribution as retraining from scratch without point i. This is exact deletion. For deterministic algorithms it reduces to equality.",
+    "formal": "R_A(D, A(D), i) =_d A(D_{-i}) for all D and all i chosen independently of A(D)"
+   },
+   {
+    "name": "Robust data deletion operation (Def. A.3)",
+    "plain": "The same distributional equality, but it must hold even when the deleted index is chosen by an adversary who can see the model and its internal state.",
+    "formal": "R_A(D, A(D), i) =_d A(D_{-i}) for any i, possibly chosen adversarially with knowledge of A(D)"
+   },
+   {
+    "name": "Online data deletion, average case (Def. A.4, Alg. 3)",
+    "plain": "Train once. Then m = Theta(n^alpha) indices, chosen uniformly at random without replacement, are deleted one at a time, and a valid model must be output after each. Cost is the expected total runtime divided by m.",
+    "formal": "mu <- A(D); for tau = 1..m: i ~ Unif; mu <- R(D, mu, i); D <- D_{-i}. Amortized cost = E[total time]/m"
+   },
+   {
+    "name": "Fractional power regime",
+    "plain": "The asymptotic regime in which the number of deletions grows as a fractional power of the dataset size.",
+    "formal": "m = Theta(n^alpha), 0 < alpha < 1"
+   },
+   {
+    "name": "alpha-deletion efficient (Def. A.5)",
+    "plain": "An algorithm whose amortized time over the online deletion stream matches the Omega(n/m) lower bound when m = Theta(n^alpha). Retraining costs at least n per request; deletion-efficient algorithms spread the training cost over all m requests.",
+    "formal": "amortized runtime O(n^{1-alpha}) when m = Theta(n^alpha)"
+   },
+   {
+    "name": "delta-approximate deletion (Def. A.6)",
+    "plain": "A relaxation of exact deletion: for any event S, the deletion output can be at most 1/delta times more likely to land in S than a retrained model. Outcomes that the deletion operation never produces are still allowed.",
+    "formal": "Pr[A(D_{-i}) in S | D_{-i}] >= delta * Pr[R_A(D, A(D), i) in S | D_{-i}] for all measurable S in H x M"
+   },
+   {
+    "name": "epsilon-differential privacy (recalled, App. A.2.1)",
+    "plain": "Output probabilities change by at most a factor e^epsilon when one data point changes. The paper discusses DP as a possible route to approximate deletion (privatize the model and ignore deletion requests) and lists its problems.",
+    "formal": "Pr[A(D1) in S] <= e^epsilon Pr[A(D2) in S] for neighbouring D1, D2"
+   },
+   {
+    "name": "gamma-balanced partition (Def. B.1)",
+    "plain": "Every cluster holds at least a gamma fraction of the average cluster size n/k. Small clusters make the quantized centroids unstable, so Q-k-means corrects them.",
+    "formal": "|pi_k| >= gamma*n/k for all clusters k"
+   },
+   {
+    "name": "Random-phase epsilon-lattice quantization (App. B.1.2)",
+    "plain": "Round each coordinate to a grid of spacing epsilon whose offset is shifted by a uniformly random phase that is redrawn at every iteration. The random shift removes bias, much like dithering, and makes the chance that a point sits near a grid boundary computable.",
+    "formal": "a(x) = argmin_{j in Z^d} ||x - epsilon(theta + j)||_2; Q(x) = epsilon(theta + a(x)); theta_tau ~ Unif[-1/2, 1/2]^d iid"
+   },
+   {
+    "name": "Linearity (principle)",
+    "plain": "If parameters are linear functions of the data (sums, means, least-squares solutions), one point's influence can be subtracted out exactly, for example with Sherman-Morrison-Woodbury or QR updates. Deleting from linear least squares takes O(d^2).",
+    "formal": ""
+   },
+   {
+    "name": "Laziness (principle)",
+    "plain": "Delay computation until inference time, as in k-nearest neighbours or Nadaraya-Watson kernel regression. Deletion is then trivial: just drop the point. Computation moves from training to inference.",
+    "formal": ""
+   },
+   {
+    "name": "Modularity (principle)",
+    "plain": "Restrict each part of the model state to depend only on one partition of the data, so a deletion only requires recomputing the affected modules. DC-k-means does this with its divide-and-conquer tree.",
+    "formal": ""
+   },
+   {
+    "name": "Quantization (principle)",
+    "plain": "Use stability, the fact that small changes to the data cause small changes to the model, by discretizing the map from data to model. A few deletions then most likely leave the quantized model unchanged, and this can be checked cheaply.",
+    "formal": ""
+   }
+  ],
+  "theory": [
+   {
+    "name": "Remark 3.1 (amortized lower bound)",
+    "statement_plain": "In the online setting with n points and m deletion requests, any sequential learning algorithm needs Omega(n/m) amortized time per request. Training alone costs Omega(n), and even a constant-time deletion oracle cannot avoid that cost.",
+    "assumptions": "The learning algorithm processes every point at least once and runs sequentially. Best case is an O(1) deletion oracle.",
+    "significance": "Sets the benchmark for optimal deletion efficiency, which motivates the definition of alpha-deletion efficiency. Tight bounds for ridge regression, decision trees and stochastic optimization are left open."
+   },
+   {
+    "name": "Theorem 4.1 (Q-k-means deletion time)",
+    "statement_plain": "For data in [0,1]^d and fixed T, k, epsilon and gamma, Q-k-means handles m deletions in expected total time O(m^2 d^{5/2} / epsilon). For fixed m and epsilon this does not depend on n, because the chance of stability rises as fast as the problem grows.",
+    "assumptions": "Expectation over the random quantization phases and the k-means++ initialization. Worst case over all normalized datasets. Deletions are uniformly random and independent of the model (average case). k, T and gamma are treated as constants.",
+    "significance": "Shows that quantization gives sublinear-in-n deletion in expectation. Most deletions cost only an O(kTd) check; retraining at O(nkTd) happens with probability O(mTkd^{3/2}/(epsilon*gamma*n)). It scales badly with dimension (d^{5/2}) and quadratically in m."
+   },
+   {
+    "name": "Correctness of Q-k-means deletion (App. C.1)",
+    "statement_plain": "The deletion operation returns a model equal in distribution to retraining. (i) Given that the deleted point is not a k-means++ seed, the k-means++ seeds of D_{-i} have the same distribution as those of D. (ii) If, under the same stored phases, every quantized centroid is unchanged, the training trajectory and output are exactly those of running on D_{-i}. (iii) Otherwise it retrains. Because the phases are iid and independent of the data, the law of total probability gives R =_d A(D_{-i}).",
+    "assumptions": "Deleted indices are chosen independently of the model, so non-adversarial. Analog centroids and phases are stored in metadata.",
+    "significance": "A reusable proof pattern for exact unlearning: share randomness between the trained run and the hypothetical retrained run, check cheaply that the output would be identical, and otherwise fall back to retraining. Exactness is preserved without retraining most of the time."
+   },
+   {
+    "name": "Lemma C.1 (boundary probability in a cube)",
+    "statement_plain": "Let X be uniform in a cube of side epsilon. The probability that X lies within epsilon'/2 of the cube's boundary, outside the inner cube of side epsilon - epsilon', is at most 2d*epsilon'/epsilon.",
+    "assumptions": "epsilon' < epsilon. Proof uses the per-dimension marginal probability 2*epsilon'/epsilon plus a union bound over d dimensions.",
+    "significance": "The basic geometric step behind quantized stability."
+   },
+   {
+    "name": "Lemma C.2 (random-phase lattice stability)",
+    "statement_plain": "For an epsilon-lattice with uniform random phase and any point X, the probability that the epsilon'-ball around X does not map to a single lattice point is less than 2d*epsilon'/epsilon. Small perturbations rarely change the rounded value.",
+    "assumptions": "Phase theta ~ Unif[-1/2, 1/2]^d, independent of X. Translation invariance makes X uniform within its lattice cell.",
+    "significance": "Turns a deterministic sensitivity bound (how far a centroid moves) into a probability that the quantized output changes. This is randomized stability, not differential privacy."
+   },
+   {
+    "name": "Lemma C.3 (quantized centroid stability)",
+    "statement_plain": "With probability greater than 1 - 2mTkd^{3/2}/(epsilon*gamma*n), over the quantization phases, Q-k-means outputs exactly the same centroids on D and on D minus Delta, for any deletion set Delta of size at most m that avoids the initial centroids. Proof: each centroid averages at least gamma*n/k points (guaranteed by the gamma-correction), and each point has norm at most sqrt(d). Deleting m points therefore moves an analog centroid by at most m*k*sqrt(d)/(gamma*n). Apply Lemma C.2 with epsilon' set to that value, then take a union bound over T iterations and k centroids.",
+    "assumptions": "Data in [0,1]^d. Same initialization and phase sequence for both runs. Delta does not intersect the initial centroids. The bookkeeping of k-factors in the union bound is loose in the text.",
+    "significance": "The core stability result. The probability of needing a retrain grows linearly in m, T, k and d^{3/2} and shrinks as epsilon*gamma*n grows. This is why larger datasets and coarser lattices make deletion cheaper."
+   },
+   {
+    "name": "Theorem C.4 (Arthur and Vassilvitskii, k-means++)",
+    "statement_plain": "k-means++ seeding gives expected loss at most (8 ln k + 16) times the optimal k-means loss L*.",
+    "assumptions": "Standard k-means++ D^2 seeding.",
+    "significance": "Imported result used to bound Q-k-means' statistical quality."
+   },
+   {
+    "name": "Corollary 4.1.1 (Q-k-means statistical performance)",
+    "statement_plain": "E[L_Q] <= (8 ln k + 16) L* + epsilon * sqrt(n d (8 ln k + 16) L*) + (1/4) n d epsilon^2. Quantization adds at most a per-coordinate rounding penalty on top of the k-means++ bound. If the data are iid from a nonatomic distribution, then L* = O(n) and the ratio of the upper bounds is 1 + O(d*epsilon^2 + epsilon*sqrt(d)). Choosing epsilon << 1/sqrt(d) matches the k-means++ guarantee.",
+    "assumptions": "The bound relies only on the k-means++ initialization. Proof adds a worst-case epsilon/2 rounding error in each coordinate, then applies Cauchy-Schwarz/Jensen.",
+    "significance": "Quantifies the trade-off: a smaller epsilon gives better loss but deletion time grows like 1/epsilon (Theorem 4.1)."
+   },
+   {
+    "name": "Proposition 4.2 (DC-k-means deletion time)",
+    "statement_plain": "With a depth-1 w-ary tree, w = Theta(n^rho) and 0 < rho < 1, DC-k-means handles m deletions in expected time O(m * max{n^rho, n^{1-rho}} * d). Each deletion re-solves one leaf, of expected size O(n^{1-rho}), and the root, which holds k*w = O(n^rho) points.",
+    "assumptions": "Expectation over the random leaf partition. Points are assigned independently and uniformly to leaves. k and T are constants. The number of leaves is fixed by rounding to a power of 2, and a retrain occurs if the rounding changes, which happens only a constant number of times in the fractional regime.",
+    "significance": "The modularity principle gives deletion cost of about sqrt(n) at rho = 1/2. The proof computes the size-biased expected leaf size from the second moment of a Binomial(n, n^{-rho}). Correctness holds because removing a point does not change how the remaining points are distributed over leaves."
+   },
+   {
+    "name": "Corollary 4.2.1 (Q-k-means alpha-deletion efficiency)",
+    "statement_plain": "With epsilon = Theta(n^{-beta}), 0 < beta < 1, the amortized time is O(n^{1-alpha} + n^{alpha+beta}). Q-k-means is therefore alpha-deletion efficient in expectation when alpha <= (1 - beta)/2.",
+    "assumptions": "m = Theta(n^alpha). Other parameters are constant. Training is O(n).",
+    "significance": "Optimal deletion efficiency holds only for small deletion rates. A finer lattice (larger beta) improves loss but shrinks the range of alpha that is efficient."
+   },
+   {
+    "name": "Corollary 4.2.2 (DC-k-means alpha-deletion efficiency)",
+    "statement_plain": "With w = Theta(n^rho) and a depth-1 tree, DC-k-means is alpha-deletion efficient in expectation when alpha <= 1 - max{rho, 1 - rho}. The main text writes a strict <. The best choice is rho = 1/2, which allows alpha up to 1/2.",
+    "assumptions": "Sequential training. m = Theta(n^alpha). Per-deletion cost O(n^{max(rho, 1-rho)}).",
+    "significance": "The tree width is the knob that trades deletion efficiency against statistical quality. Experiments use rho of about 0.3."
+   },
+   {
+    "name": "Robustness observations (App. A.1)",
+    "statement_plain": "Q-k-means deletion stays correct against an adaptive adversary, because of the enforced equality of outcome. But such an adversary can make it inefficient by always deleting initial centroids, which forces a retrain every time. DC-k-means stays efficient, because leaf sizes are fixed at random before any request. But exact distributional correctness can fail if the adversary keeps deleting from one leaf, since leaf counts stop being uniform and independent of the requests.",
+    "assumptions": "The adversary has read access to the model and metadata and issues deletion requests.",
+    "significance": "Shows that average-case deletion guarantees are not security guarantees. Designing deletion operations that are both robust and efficient is left open."
+   }
+  ],
+  "complexity": "Training: Q-k-means costs O(nkTd), like Lloyd's, plus O(kTd) metadata memory (stored centroids, phases and counts). DC-k-means with a depth-1 tree trains the leaves in O(nkTd) in total plus a root problem of size kw. Its metadata stores every node, including the leaf datasets (O(nd)). Deletion: Q-k-means needs an O(kTd) stability check per deletion and a full retrain at O(nkTd) with probability about O(mTkd^{3/2}/(epsilon*gamma*n)), for an expected O(m^2 d^{5/2}/epsilon) over m deletions. DC-k-means recomputes one leaf (expected size O(n^{1-rho})) plus the root (O(n^rho) points), for O(max{n^rho, n^{1-rho}} d) per deletion; at rho = 1/2 this is O(sqrt(n) d). The naive baseline retrains at O(nkTd) per deletion. Online regime m = Theta(n^alpha): the lower bound is Omega(n/m) = Omega(n^{1-alpha}) amortized. Q-k-means is optimal if alpha <= (1-beta)/2 with epsilon = n^{-beta}; DC-k-means if alpha <= 1 - max{rho, 1-rho}.",
+  "experiments": {
+   "datasets": [
+    "Celltype (n=12,009, d=10, k=4): mouse single-cell RNA-seq, PCA-reduced from 23,433 dims",
+    "Covtype (n=15,120, d=52, k=7): forest cover types",
+    "MNIST (n=60,000, d=784, k=10)",
+    "Postures (n=74,975, d=15, k=5): hand-posture motion capture",
+    "Botnet / N-BaIoT (n=1,018,298, d=115, k=11): IoT traffic, benign plus attack classes",
+    "Gaussian (n=100,000, d=25, k=5): synthetic spherical Gaussian mixture, variance 0.8"
+   ],
+   "models": [
+    "k-means centroid model (k = number of ground-truth classes); k-means++ seeding plus Lloyd iterations as subroutine"
+   ],
+   "baselines": [
+    "Canonical k-means: k-means++ seeding plus Lloyd's algorithm, with deletion by retraining from scratch. For the runtime benchmark it is fixed at 10 iterations; for the quality metrics it runs to convergence."
+   ],
+   "metrics": [
+    "Loss ratio (k-means objective normalized to the baseline)",
+    "Silhouette coefficient (computed on 10,000 subsampled points)",
+    "Normalized mutual information against ground-truth labels",
+    "Amortized runtime: wall-clock (training + 1,000 deletions)/1,000 on a single Xeon E5-2640v4 core",
+    "Speedup over the baseline",
+    "Number of retrains triggered during the deletion stream (Q-k-means, App. D.3.1)"
+   ],
+   "headline_results": [
+    "Q-k-means speedup over retraining: Celltype 163.3x, Covtype 13.5x, MNIST 2.2x, Postures 64.4x, Gaussian 525.6x, Botnet 584.4x (Table 4).",
+    "DC-k-means speedup: Celltype 15.6x, Covtype 13.0x, MNIST 25.4x, Postures 22.8x, Gaussian 34.5x, Botnet 70.9x.",
+    "The claimed 'average over 100x' is consistent with the arithmetic mean over both methods and 6 datasets, about 128x (my calculation). The per-method means are about 226x (Q) and about 30x (DC); the medians are about 114x (Q) and about 24x (DC).",
+    "Botnet amortized runtime: 607.8 s for the baseline vs 1.04 s for Q-k-means and 8.57 s for DC-k-means.",
+    "Loss ratio vs baseline: Q-k-means 1.014 to 1.158 (worst on Celltype 1.158 and MNIST 1.11); DC-k-means 1.003 to 1.439 (worst on Celltype 1.439 and Botnet 1.118).",
+    "Silhouette is comparable, e.g. Botnet 0.583 (k-means), 0.639 (Q), 0.627 (DC) and Celltype 0.384, 0.367, 0.422. Table 2's row labels list 'Gaussian' twice, and the third row is presumably MNIST.",
+    "NMI is comparable, e.g. MNIST 0.494, 0.459, 0.494 and Botnet 0.708, 0.73, 0.705. The largest drop is Q-k-means on Gaussian (0.245 vs 0.319).",
+    "Q-k-means gains least on high d/n data (MNIST, then Covtype), and on MNIST it keeps retraining at a roughly constant rate over the stream (Fig. 2). DC-k-means speedup grows with n for fixed d and varies less across datasets.",
+    "Parameter sweeps: Q-k-means loss degrades quickly as epsilon approaches 1, and its runtime rises steadily as epsilon approaches 0. DC-k-means loss depends only weakly on w, and on Covtype its runtime is lowest at about 32 to 64 leaves.",
+    "Clustering quality barely changes over the 1,000 deletions, which are less than 10% of every dataset."
+   ]
+  },
+  "limitations": [
+   "Concrete algorithms and proofs cover only k-means. Supervised models and deep networks get only a qualitative discussion.",
+   "Q-k-means deletion time grows like d^{5/2} and quadratically in m, so it does poorly in high dimensions and in overparameterized settings (MNIST speedup is only 2.2x). Its runtime is also more variable.",
+   "alpha-deletion efficiency holds only for small deletion rates: alpha <= (1-beta)/2 for Q-k-means and alpha <= 1/2 for DC-k-means.",
+   "Guarantees are average-case, for uniformly random deletions independent of the model. An adversary can make Q-k-means retrain on every request by deleting initial centroids, and can break DC-k-means' exact distributional equality by targeting one leaf.",
+   "The model assumes a single model and a single database, and that each user's request deletes exactly one data point.",
+   "DC-k-means has no theoretical bound on statistical quality as a function of w. It also stores all leaf datasets as metadata, a memory cost the paper does not analyze.",
+   "Hyperparameters (epsilon, w, gamma) and min-max scaling can depend on data that is later deleted. The paper uses data-light heuristics and retrains when extreme points are deleted, but a full treatment is left open.",
+   "The DP route to approximate deletion has unresolved problems: DP does not hide n, group privacy needs a budget fixed at training time, and that budget can leak how many deletions have happened.",
+   "Noticed while reading: the Q-k-means deletion pseudo-code (Alg. 5) does not explicitly re-check the loss-based early-termination decision, which also depends on the deleted point. Whether this affects exactness is unclear from the text.",
+   "Noticed while reading: the constants in k in Lemma C.3 and Theorem 4.1 are loosely tracked (the union bound appears to give k^2 while k is stated). There are also cross-reference typos ('Proposition 3.2', 'Theorem 3.1')."
+  ],
+  "future_work": [
+   "Tight upper and lower bounds on deletion efficiency for ridge regression, decision trees and models trained by stochastic optimization.",
+   "Worst-case (adversarial) online deletion, and deletion operations that are both robust and efficient.",
+   "Memory-bounded deletion, i.e. a constraint on metadata size.",
+   "Approximate deletion and its relation to differential privacy.",
+   "Systems with many models and databases and complex user-to-data relationships, where one user owns many points.",
+   "Trade-offs between training, inference and deletion time for lazy and non-parametric methods.",
+   "DC-k-means extensions: weighting centroids by cluster mass as they move up the tree, and deeper trees.",
+   "Applying the principles to segmented regression (Q-k-means plus per-cluster least squares), random Fourier feature kernel regression, quantized or randomized decision trees and bagged random forests, and quantized SGD for DNNs, which would need larger batches and fewer steps.",
+   "Metric-preserving dimensionality reduction (Johnson-Lindenstrauss) to make quantization workable for high-dimensional or overparameterized models."
+  ],
+  "relevance_to_efficient_unlearning": "This is the foundational theory paper for exact, efficient unlearning. It supplies the definition of exact deletion as equality in distribution with retraining, which SISA and MUFC adopt, and a cost model to measure against: the online stream with amortized runtime, the Omega(n/m) lower bound and alpha-deletion efficiency. Its two algorithms are reusable templates. One is quantize, memoize and verify: a cheap check with a rare full retrain. The other is modular random partitioning: recompute only the affected sub-problem. The second is an ancestor of SISA sharding and mirrors one-shot federated clustering, with clients as leaves and the server as root. Proof tools worth reusing include the random-phase lattice boundary probability, the cluster-mass bound on centroid sensitivity, and the shared-randomness, law-of-total-probability argument for exactness. Another is the size-biased binomial second moment for expected shard size. It also flags pitfalls a student must handle: d^{5/2} and m^2 dependence, adversarial deletions, and leakage through hyperparameters, scaling and early-stop decisions.",
+  "open_questions": [
+   "Prove a statistical (loss or approximation) guarantee for DC-k-means as a function of tree width w and depth, and analyze deeper trees and mass-weighted centroid merging.",
+   "Design k-means deletion that is both robust and efficient under adversarial requests. For example, re-seed only the affected centroid when an initial seed is deleted instead of retraining fully, or use seeding that does not single out individual points.",
+   "Reduce Q-k-means' d^{5/2} and m^2 dependence: project with JL before quantizing, quantize per cluster, or recompute locally from the first unstable iteration instead of retraining from scratch.",
+   "Batch and user-level deletion: analyze stability and cost when one request removes b correlated points, and when requests arrive in batches rather than one at a time.",
+   "Port quantization-plus-verification to supervised learning, e.g. quantized SGD or quantized decision trees, and compare cost and accuracy against SISA-style sharding under the same exact-deletion definition.",
+   "Bring Q-/DC-k-means into federated clustering (clients as leaves) and compare with MUFC. Alternatively, build a certified-approximate (DP-style) variant and measure the deletion-cost versus clustering-quality trade-off against the exact versions."
+  ]
+ },
+ "nodes": [
+  {
+   "id": "machine-unlearning",
+   "label": "Machine Unlearning",
+   "type": "topic",
+   "description": "Removing the influence of specific training data from a trained model, ideally without full retraining.",
+   "aliases": [
+    "data deletion in ML",
+    "machine forgetting"
+   ]
+  },
+  {
+   "id": "exact-unlearning",
+   "label": "Exact Unlearning",
+   "type": "topic",
+   "description": "Unlearning whose output is identical, or equal in distribution, to a model retrained from scratch without the deleted data.",
+   "aliases": [
+    "exact data deletion",
+    "perfect deletion"
+   ]
+  },
+  {
+   "id": "approximate-unlearning",
+   "label": "Approximate Unlearning",
+   "type": "topic",
+   "description": "Unlearning whose output is only close to the retrained model, with closeness bounded by a distance or divergence between output distributions.",
+   "aliases": [
+    "approximate data deletion"
+   ]
+  },
+  {
+   "id": "right-to-be-forgotten",
+   "label": "Right to Be Forgotten",
+   "type": "topic",
+   "description": "Legal right (e.g., GDPR, EU Right to Be Forgotten) for individuals to withdraw consent and have their personal data erased.",
+   "aliases": [
+    "RTBF",
+    "GDPR erasure",
+    "right to erasure"
+   ]
+  },
+  {
+   "id": "data-privacy",
+   "label": "Data Privacy",
+   "type": "topic",
+   "description": "Protecting individuals' information from being disclosed or inferred from data and models.",
+   "aliases": [
+    "privacy"
+   ]
+  },
+  {
+   "id": "differential-privacy",
+   "label": "Differential Privacy",
+   "type": "topic",
+   "description": "A guarantee that a randomized algorithm's output distribution changes by at most a factor e^epsilon when one data point changes.",
+   "aliases": [
+    "DP",
+    "epsilon-DP"
+   ]
+  },
+  {
+   "id": "clustering",
+   "label": "Clustering",
+   "type": "topic",
+   "description": "Unsupervised grouping of data points so that points in the same group are similar.",
+   "aliases": [
+    "cluster analysis"
+   ]
+  },
+  {
+   "id": "k-means-clustering",
+   "label": "k-Means Clustering",
+   "type": "topic",
+   "description": "Clustering objective that picks k centroids minimizing the sum of squared Euclidean distances from each point to its nearest centroid. Finding the optimum is NP-hard.",
+   "aliases": [
+    "k-means",
+    "k-means problem"
+   ]
+  },
+  {
+   "id": "q-k-means",
+   "label": "Q-k-means (Quantized k-means)",
+   "type": "method",
+   "description": "A variant of Lloyd's algorithm that rounds centroids to a randomly shifted lattice each iteration and stores the optimization state. Deleting a few points then usually leaves the output unchanged, which can be checked cheaply.",
+   "aliases": [
+    "Quantized k-means",
+    "Q-k-means"
+   ]
+  },
+  {
+   "id": "dc-k-means",
+   "label": "DC-k-means (Divide-and-Conquer k-means)",
+   "type": "method",
+   "description": "k-means solved on a tree: data are split at random into leaf sub-problems, each solved with k-means++/Lloyd's, and the leaf centroids are clustered again at parent nodes. A deletion only recomputes the path from one leaf to the root.",
+   "aliases": [
+    "Divide-and-Conquer k-means"
+   ]
+  },
+  {
+   "id": "deletion-design-principles",
+   "label": "Deletion-efficient design principles",
+   "type": "method",
+   "description": "Four engineering principles for building learners that support cheap data deletion: linearity, laziness, modularity and quantization.",
+   "aliases": [
+    "four pillars of deletion efficient learning"
+   ]
+  },
+  {
+   "id": "linearity-principle",
+   "label": "Linearity (deletion principle)",
+   "type": "method",
+   "description": "Use computations that are linear in the data so one point's contribution can be subtracted exactly, e.g. by Sherman-Morrison-Woodbury or QR updates of least-squares solutions.",
+   "aliases": [
+    "linear updates",
+    "Sherman-Morrison-Woodbury downdate",
+    "QR downdating"
+   ]
+  },
+  {
+   "id": "laziness-principle",
+   "label": "Laziness (deletion principle)",
+   "type": "method",
+   "description": "Defer computation to inference time, as in lazy and non-parametric learners such as k-nearest neighbours or Nadaraya-Watson regression. Deleting a point then just means removing it from storage.",
+   "aliases": [
+    "lazy learning",
+    "k-nearest neighbors",
+    "non-parametric methods"
+   ]
+  },
+  {
+   "id": "modularity-principle",
+   "label": "Modularity (deletion principle)",
+   "type": "method",
+   "description": "Restrict each piece of model state to depend only on a partition of the data, so a deletion only requires recomputing the affected modules.",
+   "aliases": [
+    "modularization",
+    "data isolation"
+   ]
+  },
+  {
+   "id": "quantization",
+   "label": "Quantization",
+   "type": "method",
+   "description": "Mapping continuous values to a discrete set of points, such as a lattice. Applied to the data-to-model map, small data changes then usually leave the discrete model unchanged.",
+   "aliases": [
+    "lattice quantization",
+    "discretization"
+   ]
+  },
+  {
+   "id": "divide-and-conquer",
+   "label": "Divide and Conquer",
+   "type": "method",
+   "description": "Algorithmic strategy that splits a problem into independent sub-problems, solves them separately, and merges their solutions.",
+   "aliases": [
+    "hierarchical merging"
+   ]
+  },
+  {
+   "id": "retrain-from-scratch",
+   "label": "Retrain from Scratch",
+   "type": "method",
+   "description": "Naive exact unlearning: rerun the training algorithm on the dataset with the deleted points removed.",
+   "aliases": [
+    "naive retraining",
+    "full retraining"
+   ]
+  },
+  {
+   "id": "lloyds-algorithm",
+   "label": "Lloyd's Algorithm",
+   "type": "method",
+   "description": "Iterative k-means heuristic that alternates between assigning points to their nearest centroid and recomputing each centroid as the mean of its cluster.",
+   "aliases": [
+    "Lloyd iterations",
+    "standard k-means algorithm"
+   ]
+  },
+  {
+   "id": "k-means-plus-plus",
+   "label": "k-means++",
+   "type": "method",
+   "description": "Randomized seeding for k-means: the first centroid is uniform, and each later one is sampled with probability proportional to squared distance from the nearest chosen centroid.",
+   "aliases": [
+    "k-means++ seeding",
+    "D^2 sampling"
+   ]
+  },
+  {
+   "id": "random-phase-lattice-quantization",
+   "label": "Random-phase epsilon-lattice quantization",
+   "type": "method",
+   "description": "Rounding to the nearest vertex of a uniform grid of spacing epsilon whose offset is shifted by an independent uniform random phase, which de-biases the rounding (dithered quantization).",
+   "aliases": [
+    "dithered lattice quantization",
+    "randomly shifted grid rounding"
+   ]
+  },
+  {
+   "id": "metadata-memoization",
+   "label": "Training-state memoization (metadata)",
+   "type": "method",
+   "description": "Storing intermediate training state, such as per-iteration centroids, random seeds, cluster sizes or sub-problem datasets, so that later deletions can be verified or recomputed locally.",
+   "aliases": [
+    "memoization",
+    "metadata",
+    "saved optimization state"
+   ]
+  },
+  {
+   "id": "gamma-balance-correction",
+   "label": "gamma-balance correction",
+   "type": "method",
+   "description": "A momentum-style fix for small clusters: when a cluster has fewer than gamma*n/k points, its new centroid is averaged with the previous centroid, weighted by the missing mass, so it cannot move much.",
+   "aliases": [
+    "balance correction",
+    "gamma-correction"
+   ]
+  },
+  {
+   "id": "centroid-stability-check",
+   "label": "Quantized-centroid stability check",
+   "type": "method",
+   "description": "Deletion check: recompute each affected centroid without the deleted point using stored state, re-quantize it with the stored random phase, and confirm the quantized value is unchanged. If it changed, retrain.",
+   "aliases": [
+    "stability verification",
+    "Q-k-means deletion operation"
+   ]
+  },
+  {
+   "id": "random-leaf-partitioning",
+   "label": "Uniform random leaf partitioning",
+   "type": "method",
+   "description": "Assigning each data point independently and uniformly at random to one of w leaves (a multinomial partition), so that leaf membership does not depend on the other points.",
+   "aliases": [
+    "random multinomial partition"
+   ]
+  },
+  {
+   "id": "leaf-to-root-recomputation",
+   "label": "Leaf-to-root recomputation",
+   "type": "method",
+   "description": "Deletion in a divide-and-conquer tree: remove the point from its leaf and re-solve only the nodes on the path from that leaf to the root.",
+   "aliases": [
+    "path recomputation"
+   ]
+  },
+  {
+   "id": "data-sharding",
+   "label": "Data Sharding",
+   "type": "method",
+   "description": "Splitting the training data into disjoint subsets that are processed or trained on separately, so the effect of each point is confined to one shard.",
+   "aliases": [
+    "sharding",
+    "data partitioning"
+   ]
+  },
+  {
+   "id": "distributed-k-means",
+   "label": "Distributed k-means",
+   "type": "method",
+   "description": "k-means variants that solve local clustering problems on data partitions and combine the local centroids, e.g. scalable k-means++ and MapReduce k-means.",
+   "aliases": [
+    "parallel k-means",
+    "hierarchical k-means"
+   ]
+  },
+  {
+   "id": "random-fourier-features",
+   "label": "Random Fourier Features",
+   "type": "method",
+   "description": "Kernel approximation using random, data-independent feature maps followed by a linear model on top of the features.",
+   "aliases": [
+    "RFF",
+    "random features"
+   ]
+  },
+  {
+   "id": "segmented-regression",
+   "label": "Segmented (piecewise) regression",
+   "type": "method",
+   "description": "Regression that fits separate linear models on different regions or segments of the input space.",
+   "aliases": [
+    "piecewise linear regression"
+   ]
+  },
+  {
+   "id": "unlearning-cost",
+   "label": "Unlearning Cost",
+   "type": "problem",
+   "description": "The time, compute and energy needed to remove data from a model. It is very high when the only option is full retraining.",
+   "aliases": [
+    "deletion cost",
+    "retraining cost"
+   ]
+  },
+  {
+   "id": "model-inversion-attack",
+   "label": "Model Inversion Attack",
+   "type": "problem",
+   "description": "An attack that reconstructs or extracts information about training data from a trained model.",
+   "aliases": [
+    "model inversion"
+   ]
+  },
+  {
+   "id": "deletion-performance-tradeoff",
+   "label": "Deletion-efficiency vs statistical-performance trade-off",
+   "type": "problem",
+   "description": "Structured, simple computation makes deletion cheap but can hurt accuracy, while complex processing performs well but makes deletion expensive.",
+   "aliases": [
+    "efficiency-utility trade-off"
+   ]
+  },
+  {
+   "id": "high-dimensional-instability",
+   "label": "Quantization instability in high dimensions",
+   "type": "problem",
+   "description": "In high dimensions or overparameterized models, a perturbation is more likely to cross a quantization boundary, so quantized models become unstable under deletions.",
+   "aliases": [
+    "curse of dimensionality for quantization",
+    "overparameterization"
+   ]
+  },
+  {
+   "id": "cluster-imbalance",
+   "label": "Cluster imbalance",
+   "type": "problem",
+   "description": "Some clusters contain far fewer points than average, so each point has a large influence on that cluster's centroid.",
+   "aliases": [
+    "imbalanced clusters",
+    "gamma-imbalance"
+   ]
+  },
+  {
+   "id": "adversarial-deletion-requests",
+   "label": "Adversarial deletion requests",
+   "type": "problem",
+   "description": "Deletion requests chosen by an adversary who knows the model or its internal state, aiming to break the correctness or efficiency of the deletion procedure.",
+   "aliases": [
+    "adaptive deletion adversary",
+    "worst-case deletion stream"
+   ]
+  },
+  {
+   "id": "hyperparameter-tuning-dependence",
+   "label": "Hyperparameter / preprocessing data dependence",
+   "type": "problem",
+   "description": "Hyperparameters and preprocessing statistics, such as scaling, that are tuned on data that may later be deleted. They then still carry that data's influence after deletion.",
+   "aliases": [
+    "hyperparameter leakage"
+   ]
+  },
+  {
+   "id": "data-deletion-operation",
+   "label": "Data deletion operation (exact, distributional)",
+   "type": "theory",
+   "description": "A procedure mapping (dataset, trained model, index i) to a model that is equal in distribution to the learning algorithm run on the dataset without point i.",
+   "aliases": [
+    "exact deletion definition",
+    "R_A(D, A(D), i) =_d A(D_{-i})"
+   ]
+  },
+  {
+   "id": "robust-data-deletion",
+   "label": "Robust data deletion operation",
+   "type": "theory",
+   "description": "A deletion operation whose distributional equality with retraining holds even when the deleted index is chosen adversarially with knowledge of the model.",
+   "aliases": [
+    "adversarially robust deletion"
+   ]
+  },
+  {
+   "id": "delta-approximate-deletion",
+   "label": "delta-approximate deletion",
+   "type": "theory",
+   "description": "A relaxed deletion guarantee: for every event, the deletion output's probability is at most 1/delta times the probability under retraining.",
+   "aliases": [
+    "approximate data deletion",
+    "delta-deletion"
+   ]
+  },
+  {
+   "id": "online-data-deletion",
+   "label": "Online data deletion model",
+   "type": "theory",
+   "description": "A computational model in which a trained model must handle a stream of deletion requests one at a time, outputting a valid model after each, with cost measured as amortized runtime.",
+   "aliases": [
+    "online deletion setting",
+    "deletion stream"
+   ]
+  },
+  {
+   "id": "amortized-runtime-lower-bound",
+   "label": "Omega(n/m) amortized deletion lower bound",
+   "type": "theory",
+   "description": "Any sequential learner must touch all n points once, so over m deletion requests the amortized cost per request is at least Omega(n/m).",
+   "aliases": [
+    "amortized lower bound"
+   ]
+  },
+  {
+   "id": "deletion-efficiency",
+   "label": "Deletion Efficiency (alpha-deletion efficient)",
+   "type": "theory",
+   "description": "A learning algorithm is deletion efficient if its amortized cost over a deletion stream matches the lower bound. For m = Theta(n^alpha) this means amortized O(n^{1-alpha}).",
+   "aliases": [
+    "alpha-deletion efficient",
+    "deletion efficient learning"
+   ]
+  },
+  {
+   "id": "q-k-means-deletion-time-theorem",
+   "label": "Q-k-means deletion-time theorem (Thm 4.1)",
+   "type": "theory",
+   "description": "Bound on the expected total time of m deletions in Q-k-means: O(m^2 d^{5/2} / epsilon), independent of n.",
+   "aliases": [
+    "Theorem 4.1"
+   ]
+  },
+  {
+   "id": "quantized-centroid-stability-lemma",
+   "label": "Quantized centroid stability lemma (Lemma C.3)",
+   "type": "theory",
+   "description": "With high probability over random lattice phases, deleting up to m non-seed points leaves every quantized centroid of every iteration unchanged. The failure probability is at most 2mTkd^{3/2}/(epsilon*gamma*n).",
+   "aliases": [
+    "Lemma C.3",
+    "quantized stability"
+   ]
+  },
+  {
+   "id": "random-lattice-boundary-lemma",
+   "label": "Random-phase lattice boundary lemma (Lemmas C.1-C.2)",
+   "type": "theory",
+   "description": "For a randomly shifted epsilon-lattice, the probability that an epsilon'-ball around a point straddles a cell boundary is at most 2d*epsilon'/epsilon.",
+   "aliases": [
+    "Lemma C.1",
+    "Lemma C.2"
+   ]
+  },
+  {
+   "id": "q-k-means-loss-bound",
+   "label": "Q-k-means loss bound (Cor 4.1.1)",
+   "type": "theory",
+   "description": "Expected k-means loss of Q-k-means is at most the k-means++ bound plus quantization terms epsilon*sqrt(nd(8 ln k + 16)L*) + nd*epsilon^2/4.",
+   "aliases": [
+    "Corollary 4.1.1"
+   ]
+  },
+  {
+   "id": "dc-k-means-deletion-time-proposition",
+   "label": "DC-k-means deletion-time bound (Prop 4.2)",
+   "type": "theory",
+   "description": "With a depth-1 tree of width w = Theta(n^rho), m deletions take expected time O(m * max{n^rho, n^{1-rho}} * d).",
+   "aliases": [
+    "Proposition 4.2"
+   ]
+  },
+  {
+   "id": "q-k-means-alpha-efficiency",
+   "label": "Q-k-means alpha-deletion efficiency (Cor 4.2.1)",
+   "type": "theory",
+   "description": "With lattice width epsilon = Theta(n^{-beta}), Q-k-means is alpha-deletion efficient in expectation when alpha <= (1-beta)/2.",
+   "aliases": [
+    "Corollary 4.2.1"
+   ]
+  },
+  {
+   "id": "dc-k-means-alpha-efficiency",
+   "label": "DC-k-means alpha-deletion efficiency (Cor 4.2.2)",
+   "type": "theory",
+   "description": "With tree width w = Theta(n^rho), depth-1 DC-k-means is alpha-deletion efficient in expectation when alpha <= 1 - max{rho, 1-rho}, so alpha can reach 1/2 at rho = 1/2.",
+   "aliases": [
+    "Corollary 4.2.2"
+   ]
+  },
+  {
+   "id": "k-means-plus-plus-guarantee",
+   "label": "k-means++ O(log k) approximation",
+   "type": "theory",
+   "description": "Arthur and Vassilvitskii's result that k-means++ seeding gives expected loss at most (8 ln k + 16) times the optimal k-means loss.",
+   "aliases": [
+    "Theorem C.4",
+    "Arthur-Vassilvitskii bound"
+   ]
+  },
+  {
+   "id": "algorithmic-stability",
+   "label": "Algorithmic Stability",
+   "type": "theory",
+   "description": "The property that small changes to the training set, such as removing one point, cause only small changes to the learned model or its output distribution.",
+   "aliases": [
+    "stability",
+    "leave-one-out stability"
+   ]
+  },
+  {
+   "id": "approximation-guarantee",
+   "label": "Approximation Guarantee",
+   "type": "theory",
+   "description": "A bound showing that an algorithm's objective value is within a factor or additive term of the optimum.",
+   "aliases": [
+    "approximation ratio"
+   ]
+  },
+  {
+   "id": "unlearning-guarantee",
+   "label": "Unlearning Guarantee",
+   "type": "theory",
+   "description": "A formal criterion stating what it means for data to have been removed from a model, e.g. equality or closeness to retraining.",
+   "aliases": [
+    "deletion guarantee"
+   ]
+  },
+  {
+   "id": "celltype",
+   "label": "Celltype (Mouse Cell Atlas)",
+   "type": "dataset",
+   "description": "Single-cell RNA-seq data from the Mouse Cell Atlas for 4 cell types (n=12,009), reduced by PCA to 10 dimensions.",
+   "aliases": [
+    "Celltypes",
+    "Mouse Cell Atlas microwell-seq"
+   ]
+  },
+  {
+   "id": "covtype",
+   "label": "Covtype",
+   "type": "dataset",
+   "description": "Forest cover type dataset of cartographic variables labelled with 7 cover types. The paper uses a 15,120-sample, 52-dimensional version.",
+   "aliases": [
+    "Forest CoverType"
+   ]
+  },
+  {
+   "id": "mnist",
+   "label": "MNIST",
+   "type": "dataset",
+   "description": "60,000 training images of handwritten digits (28x28 grayscale, 10 classes).",
+   "aliases": []
+  },
+  {
+   "id": "postures",
+   "label": "Postures",
+   "type": "dataset",
+   "description": "Motion-capture recordings of 5 hand postures from markers on a glove (n=74,975, d=15).",
+   "aliases": [
+    "Motion Capture Hand Postures"
+   ]
+  },
+  {
+   "id": "botnet-n-baiot",
+   "label": "Botnet (N-BaIoT)",
+   "type": "dataset",
+   "description": "Network traffic statistics from an IoT device: benign traffic plus botnet attack classes (n=1,018,298, d=115, 11 classes).",
+   "aliases": [
+    "Botnet",
+    "N-BaIoT",
+    "Danmini Doorbell"
+   ]
+  },
+  {
+   "id": "gaussian-mixture-synthetic",
+   "label": "Synthetic Gaussian mixture",
+   "type": "dataset",
+   "description": "Synthetic data drawn from a mixture of spherical Gaussians. In this paper: 5 clusters in 25 dimensions, 100,000 samples, variance 0.8.",
+   "aliases": [
+    "Gaussian"
+   ]
+  },
+  {
+   "id": "k-means-cost",
+   "label": "k-means cost (loss ratio)",
+   "type": "metric",
+   "description": "Sum of squared distances from each point to its nearest centroid. It is often reported as a ratio to a baseline's cost.",
+   "aliases": [
+    "k-means objective",
+    "loss ratio",
+    "SSE"
+   ]
+  },
+  {
+   "id": "silhouette-coefficient",
+   "label": "Silhouette Coefficient",
+   "type": "metric",
+   "description": "Label-free clustering score in [-1, 1] that compares each point's average distance within its own cluster to its distance to the nearest other cluster. Higher means denser, better-separated clusters.",
+   "aliases": [
+    "silhouette score"
+   ]
+  },
+  {
+   "id": "normalized-mutual-information",
+   "label": "Normalized Mutual Information (NMI)",
+   "type": "metric",
+   "description": "Agreement between a clustering and ground-truth labels, up to permutation, normalized to at most 1.",
+   "aliases": [
+    "NMI"
+   ]
+  },
+  {
+   "id": "amortized-runtime",
+   "label": "Amortized runtime",
+   "type": "metric",
+   "description": "Total computation time (training plus processing a stream of deletion requests) divided by the number of requests.",
+   "aliases": [
+    "amortized deletion time",
+    "unlearning time"
+   ]
+  },
+  {
+   "id": "speedup",
+   "label": "Speedup",
+   "type": "metric",
+   "description": "Ratio of a baseline's runtime to a proposed method's runtime.",
+   "aliases": []
+  },
+  {
+   "id": "linear-model",
+   "label": "Linear models (least squares)",
+   "type": "model",
+   "description": "Models whose parameters solve linear equations in the data, e.g. linear or ridge regression. Closed-form rank-one updates allow fast exact deletion.",
+   "aliases": [
+    "linear regression",
+    "ridge regression"
+   ]
+  },
+  {
+   "id": "decision-tree",
+   "label": "Decision trees / random forests",
+   "type": "model",
+   "description": "Tree models that split the feature space on learned thresholds. Random forests bag many randomized trees.",
+   "aliases": [
+    "random forest",
+    "extremely randomized trees"
+   ]
+  },
+  {
+   "id": "deep-neural-network",
+   "label": "Deep neural network (SGD-trained)",
+   "type": "model",
+   "description": "Multi-layer neural network trained by stochastic gradient descent. Highly overparameterized, so exact deletion is costly.",
+   "aliases": [
+    "DNN",
+    "neural network"
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "source": "ginart2019-deletion",
+   "target": "q-k-means",
+   "relation": "proposes",
+   "note": "Proposed as the quantized, deletion-efficient variant of Lloyd's algorithm.",
+   "evidence": "Sec 4.1: 'We propose a quantized variant of Lloyd's algorithm ... called Q-k-means'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "dc-k-means",
+   "relation": "proposes",
+   "note": "Second proposed algorithm, using a random divide-and-conquer tree for modular deletion.",
+   "evidence": "Sec 4.2, Algorithm 2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "deletion-design-principles",
+   "relation": "proposes",
+   "note": "Draws four general principles for deletion-efficient learning from the theory and experiments.",
+   "evidence": "Sec 3.1: 'four design principles ... pillars of deletion efficient learning'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "data-deletion-operation",
+   "relation": "proposes",
+   "note": "Introduces the first definition of exact deletion that also covers stochastic learners.",
+   "evidence": "Definition 3.1; Definition A.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "online-data-deletion",
+   "relation": "proposes",
+   "note": "Frames deletion as an online problem with amortized cost.",
+   "evidence": "Sec 3 'Data Deletion as an Online Problem'; Def A.4, Alg 3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "deletion-efficiency",
+   "relation": "proposes",
+   "note": "Defines alpha-deletion efficiency as matching the amortized lower bound in the fractional power regime.",
+   "evidence": "Def A.5; Sec 4.3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "robust-data-deletion",
+   "relation": "proposes",
+   "note": "Defines a security-oriented variant that holds against adaptive adversaries.",
+   "evidence": "Definition A.3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "delta-approximate-deletion",
+   "relation": "proposes",
+   "note": "Sketches a relaxation from exact to approximate deletion and leaves it for future work.",
+   "evidence": "Definition A.6"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "amortized-runtime-lower-bound",
+   "relation": "proves",
+   "note": "Establishes the Omega(n/m) amortized lower bound for any sequential learner.",
+   "evidence": "Remark 3.1"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "q-k-means-deletion-time-theorem",
+   "relation": "proves",
+   "note": "Proves exactness and expected O(m^2 d^{5/2}/epsilon) deletion time for Q-k-means.",
+   "evidence": "Theorem 4.1; App C.1"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "quantized-centroid-stability-lemma",
+   "relation": "proves",
+   "note": "Key lemma bounding the probability that deletions change any quantized centroid.",
+   "evidence": "Lemma C.3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "random-lattice-boundary-lemma",
+   "relation": "proves",
+   "note": "Geometric lemmas on boundary crossing for a random-phase lattice.",
+   "evidence": "Lemmas C.1, C.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "q-k-means-loss-bound",
+   "relation": "proves",
+   "note": "Bounds Q-k-means' expected loss relative to the optimum.",
+   "evidence": "Corollary 4.1.1; App C.2.1"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "dc-k-means-deletion-time-proposition",
+   "relation": "proves",
+   "note": "Proves correctness and expected deletion time for depth-1 DC-k-means.",
+   "evidence": "Proposition 4.2; App C.2.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "q-k-means-alpha-efficiency",
+   "relation": "proves",
+   "note": "Derives the range of deletion rates for which Q-k-means is optimal.",
+   "evidence": "Corollary 4.2.1: 'alpha <= (1-beta)/2'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "dc-k-means-alpha-efficiency",
+   "relation": "proves",
+   "note": "Derives the range of deletion rates for which DC-k-means is optimal.",
+   "evidence": "Corollary 4.2.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "machine-unlearning",
+   "relation": "addresses",
+   "note": "Poses efficiently deleting individual points from trained models as a core ML data-management operation.",
+   "evidence": "Abstract: 'formulate the problem of efficiently deleting individual data points'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "exact-unlearning",
+   "relation": "addresses",
+   "note": "Focuses only on exact deletion: the model must look as if the point was never seen.",
+   "evidence": "Sec 3: 'Here we focus on exact data deletion'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "right-to-be-forgotten",
+   "relation": "motivated_by",
+   "note": "Motivated by GDPR / Right to Be Forgotten and a UK Biobank participant-withdrawal email.",
+   "evidence": "Sec 1: UK Biobank email; GDPR and Right to Be Forgotten"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "model-inversion-attack",
+   "relation": "motivated_by",
+   "note": "Model inversion shows that trained models can leak user data, so deletion has to reach the model.",
+   "evidence": "Sec 1: 'model-inversion attacks ... extract user information'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "unlearning-cost",
+   "relation": "addresses",
+   "note": "The goal is to avoid the time and energy cost of retraining on every request.",
+   "evidence": "Sec 1: retraining 'is often not computationally practical'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "k-means-clustering",
+   "relation": "addresses",
+   "note": "Uses k-means as the case study for deletion-efficient learning.",
+   "evidence": "Sec 4: 'we focus on k-means clustering as a case study'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "deletion-performance-tradeoff",
+   "relation": "addresses",
+   "note": "Frames epsilon and w as knobs trading deletion time against clustering quality.",
+   "evidence": "App E.1; Sec 4.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "hyperparameter-tuning-dependence",
+   "relation": "addresses",
+   "note": "Sets epsilon, w and gamma with data-light heuristics, and suggests tuning on data unlikely to be deleted.",
+   "evidence": "App D.1.2; App E.3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "retrain-from-scratch",
+   "relation": "compares_against",
+   "note": "The baseline is k-means++/Lloyd's retrained from scratch on every deletion request.",
+   "evidence": "Sec 5: 'deletions are satisfied by re-training from scratch'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "differential-privacy",
+   "relation": "contrasts_with",
+   "note": "Argues that deletion is a computational problem while privacy is a statistical one; neither implies the other.",
+   "evidence": "Sec 2: 'algorithms that are private do not have to support efficient deletion'"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "celltype",
+   "relation": "evaluates_on",
+   "note": "Q-k-means 163x and DC-k-means 15.6x speedup; worst DC loss ratio (1.439).",
+   "evidence": "Tables 1-4"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "covtype",
+   "relation": "evaluates_on",
+   "note": "Second-highest d/n ratio; about 13x speedup for both methods.",
+   "evidence": "Table 4"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "mnist",
+   "relation": "evaluates_on",
+   "note": "Highest d/n ratio; Q-k-means gains only 2.2x while DC-k-means gains 25.4x.",
+   "evidence": "Table 4; Sec 5.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "postures",
+   "relation": "evaluates_on",
+   "note": "Low-dimensional real dataset; 64.4x (Q) and 22.8x (DC) speedup.",
+   "evidence": "Table 4"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "botnet-n-baiot",
+   "relation": "evaluates_on",
+   "note": "Largest dataset (about 1M points); 584x (Q) and 70.9x (DC) speedup.",
+   "evidence": "Table 4"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "gaussian-mixture-synthetic",
+   "relation": "evaluates_on",
+   "note": "Synthetic 5-cluster mixture in 25 dimensions; 525.6x (Q) and 34.5x (DC) speedup.",
+   "evidence": "Table 4; App D.2"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "k-means-cost",
+   "relation": "measures_with",
+   "note": "Reports the k-means loss normalized to the baseline (loss ratio).",
+   "evidence": "Table 1: Loss Ratio"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "silhouette-coefficient",
+   "relation": "measures_with",
+   "note": "Label-free cluster quality, computed on 10,000 subsampled points.",
+   "evidence": "Table 2; App D.1.3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "normalized-mutual-information",
+   "relation": "measures_with",
+   "note": "Agreement with ground-truth labels.",
+   "evidence": "Table 3"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "amortized-runtime",
+   "relation": "measures_with",
+   "note": "Wall-clock (train once plus 1,000 deletions) divided by 1,000 on a single CPU core.",
+   "evidence": "Table 4; App D.1"
+  },
+  {
+   "source": "ginart2019-deletion",
+   "target": "speedup",
+   "relation": "measures_with",
+   "note": "Speedup of amortized runtime over retraining; 'average of over 100x'.",
+   "evidence": "Abstract; Table 4"
+  },
+  {
+   "source": "q-k-means",
+   "target": "exact-unlearning",
+   "relation": "is_a",
+   "note": "Its deletion operation returns a model equal in distribution to retraining.",
+   "evidence": "App C.1 Proof (Correctness)"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "exact-unlearning",
+   "relation": "is_a",
+   "note": "Recomputing the affected leaf-to-root path gives exact distributional equality, assuming non-adversarial requests.",
+   "evidence": "App C.2.2 Proof (Correctness)"
+  },
+  {
+   "source": "q-k-means",
+   "target": "lloyds-algorithm",
+   "relation": "extends",
+   "note": "Follows Lloyd's iterations but adds quantization, memoization, balance correction and early termination.",
+   "evidence": "Sec 4.1: 'four key differences from Lloyd's algorithm'"
+  },
+  {
+   "source": "q-k-means",
+   "target": "k-means-plus-plus",
+   "relation": "uses",
+   "note": "Seeds with k-means++; deleting a seed point forces a full retrain.",
+   "evidence": "Algorithm 1; Algorithm 5"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "k-means-plus-plus",
+   "relation": "uses",
+   "note": "Each tree node is solved by k-means++ seeding plus T Lloyd iterations.",
+   "evidence": "Algorithm 2: 'c <- k-means++(node.dataset,k,T)'"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "distributed-k-means",
+   "relation": "builds_on",
+   "note": "Similar to distributed k-means but adapted for deletion and defined over general rooted trees.",
+   "evidence": "Sec 4.2: 'close similarities to pre-existing distributed k-means algorithms'"
+  },
+  {
+   "source": "random-phase-lattice-quantization",
+   "target": "q-k-means",
+   "relation": "part_of",
+   "note": "Centroids are rounded to a lattice with a random phase redrawn at every iteration.",
+   "evidence": "Algorithm 4; App B.1.2"
+  },
+  {
+   "source": "random-phase-lattice-quantization",
+   "target": "quantization",
+   "relation": "is_a",
+   "note": "A concrete uniform lattice quantizer, de-biased by a random phase shift.",
+   "evidence": "App B.1.2"
+  },
+  {
+   "source": "metadata-memoization",
+   "target": "q-k-means",
+   "relation": "part_of",
+   "note": "Stores the initial centroids and, per iteration, (c, theta, c_hat, cluster sizes), costing O(kTd) memory.",
+   "evidence": "Algorithm 1: 'save(c,theta,c_hat,|pi'|)'"
+  },
+  {
+   "source": "metadata-memoization",
+   "target": "dc-k-means",
+   "relation": "part_of",
+   "note": "All tree nodes, with their datasets and centroids, are saved as metadata.",
+   "evidence": "Algorithm 2: 'save all nodes as metadata'"
+  },
+  {
+   "source": "gamma-balance-correction",
+   "target": "q-k-means",
+   "relation": "part_of",
+   "note": "Averages small clusters' centroids with the previous centroids to keep them stable.",
+   "evidence": "Algorithm 4; App B.1.1"
+  },
+  {
+   "source": "gamma-balance-correction",
+   "target": "cluster-imbalance",
+   "relation": "mitigates",
+   "note": "Ensures every centroid behaves as if it averages at least gamma*n/k points, which bounds per-deletion sensitivity.",
+   "evidence": "App B.1.1: 'imbalanced partitions can lead to unstable quantized centroids'"
+  },
+  {
+   "source": "centroid-stability-check",
+   "target": "q-k-means",
+   "relation": "part_of",
+   "note": "This check is the Q-k-means deletion operation.",
+   "evidence": "Algorithm 5"
+  },
+  {
+   "source": "centroid-stability-check",
+   "target": "metadata-memoization",
+   "relation": "uses",
+   "note": "Loads the stored analog centroids, phases and counts to recompute each perturbed centroid.",
+   "evidence": "Algorithm 5: 'load(c,theta,c_hat,|pi|)'"
+  },
+  {
+   "source": "centroid-stability-check",
+   "target": "retrain-from-scratch",
+   "relation": "uses",
+   "note": "Falls back to full retraining if a quantized centroid would change or the point was a seed.",
+   "evidence": "Algorithm 5: 'return Q-k-means(D_{-i})'"
+  },
+  {
+   "source": "centroid-stability-check",
+   "target": "unlearning-cost",
+   "relation": "mitigates",
+   "note": "Most deletions cost only an O(kTd) check instead of an O(nkTd) retrain.",
+   "evidence": "App C.1 runtime sketch"
+  },
+  {
+   "source": "random-leaf-partitioning",
+   "target": "dc-k-means",
+   "relation": "part_of",
+   "note": "Each point goes to a leaf uniformly at random, so deletions leave the other points' assignments distributed the same way.",
+   "evidence": "Algorithm 2; Sec 4.2"
+  },
+  {
+   "source": "random-leaf-partitioning",
+   "target": "data-sharding",
+   "relation": "is_a",
+   "note": "The random leaves are disjoint data shards processed independently.",
+   "evidence": "Sec 4.2: dataset partitioned into each leaf as a uniform multinomial"
+  },
+  {
+   "source": "leaf-to-root-recomputation",
+   "target": "dc-k-means",
+   "relation": "part_of",
+   "note": "This is the DC-k-means deletion operation.",
+   "evidence": "Algorithm 6"
+  },
+  {
+   "source": "leaf-to-root-recomputation",
+   "target": "unlearning-cost",
+   "relation": "mitigates",
+   "note": "Only one leaf (O(n^{1-rho}) points) and the root (O(n^rho) points) are recomputed.",
+   "evidence": "Proposition 4.2"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "divide-and-conquer",
+   "relation": "uses",
+   "note": "Solves small sub-problems and merges their centroids recursively.",
+   "evidence": "Sec 4.2"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "modularity-principle",
+   "relation": "uses",
+   "note": "Modularity is realized by managing computation-data dependence through the tree.",
+   "evidence": "Sec 3.1: 'In DC-k-means, we leverage modularity'"
+  },
+  {
+   "source": "q-k-means",
+   "target": "quantization",
+   "relation": "uses",
+   "note": "Relies directly on quantization to make the centroids stable under deletions.",
+   "evidence": "Sec 4.1: 'directly relies the principle of quantization'"
+  },
+  {
+   "source": "q-k-means",
+   "target": "linearity-principle",
+   "relation": "uses",
+   "note": "Centroids are linear averages, so a deleted point's effect on a centroid is computed in closed form.",
+   "evidence": "Sec 4.1: 'also leverages on the principle of linearity'"
+  },
+  {
+   "source": "divide-and-conquer",
+   "target": "modularity-principle",
+   "relation": "enables",
+   "note": "A divide-and-conquer tree confines each point's influence to one root-to-leaf path.",
+   "evidence": "Sec 3.1 Modularity"
+  },
+  {
+   "source": "quantization",
+   "target": "algorithmic-stability",
+   "relation": "builds_on",
+   "note": "Quantizing the data-to-model map turns stability into exact invariance with high probability.",
+   "evidence": "Sec 3.1: 'this idea is known to as stability'"
+  },
+  {
+   "source": "linearity-principle",
+   "target": "deletion-design-principles",
+   "relation": "part_of",
+   "note": "First of the four principles.",
+   "evidence": "Sec 3.1 Linearity"
+  },
+  {
+   "source": "laziness-principle",
+   "target": "deletion-design-principles",
+   "relation": "part_of",
+   "note": "Second principle; not used in this paper's clustering methods.",
+   "evidence": "Sec 3.1 Laziness"
+  },
+  {
+   "source": "modularity-principle",
+   "target": "deletion-design-principles",
+   "relation": "part_of",
+   "note": "Third principle, realized by DC-k-means.",
+   "evidence": "Sec 3.1 Modularity"
+  },
+  {
+   "source": "quantization",
+   "target": "deletion-design-principles",
+   "relation": "part_of",
+   "note": "Fourth principle, realized by Q-k-means; most effective when there are few parameters relative to n.",
+   "evidence": "Sec 3.1 Quantization"
+  },
+  {
+   "source": "laziness-principle",
+   "target": "amortized-runtime-lower-bound",
+   "relation": "contrasts_with",
+   "note": "Lazy learners process data at inference time, outside the Omega(n)-training model behind the bound.",
+   "evidence": "App A.1 'Inference Time'"
+  },
+  {
+   "source": "linear-model",
+   "target": "linearity-principle",
+   "relation": "uses",
+   "note": "Least squares supports O(d^2) deletion via QR or Sherman-Morrison-Woodbury updates.",
+   "evidence": "Sec 3.1: 'QR factorization ... delete datapoints ... in time O(d^2)'"
+  },
+  {
+   "source": "segmented-regression",
+   "target": "q-k-means",
+   "relation": "builds_on",
+   "note": "Proposes Q-k-means plus one linear model per cluster; stable clusters allow a simple linear update.",
+   "evidence": "Sec 6 'Segmented Regression'"
+  },
+  {
+   "source": "segmented-regression",
+   "target": "linearity-principle",
+   "relation": "uses",
+   "note": "Deleting from a cluster's model is a linear least-squares downdate.",
+   "evidence": "Sec 6"
+  },
+  {
+   "source": "random-fourier-features",
+   "target": "linearity-principle",
+   "relation": "uses",
+   "note": "Random features do not depend on the data, so only the linear layer needs updating on deletion.",
+   "evidence": "Sec 6 'Kernel Regression'"
+  },
+  {
+   "source": "decision-tree",
+   "target": "quantization",
+   "relation": "uses",
+   "note": "Suggests quantizing or randomizing split criteria (as in extremely randomized trees) to support deletion.",
+   "evidence": "Sec 6 'Decision Trees and Random Forests'"
+  },
+  {
+   "source": "decision-tree",
+   "target": "modularity-principle",
+   "relation": "uses",
+   "note": "Bagging in random forests naturally imposes modularity.",
+   "evidence": "Sec 6: 'bagging, which naturally can be used to impose modularity'"
+  },
+  {
+   "source": "deep-neural-network",
+   "target": "quantization",
+   "relation": "uses",
+   "note": "Suggests quantizing SGD gradient updates to get Q-k-means-style parameter stability, which would need larger batches and fewer steps.",
+   "evidence": "Sec 6 'Deep Neural Networks and SGD'"
+  },
+  {
+   "source": "deep-neural-network",
+   "target": "high-dimensional-instability",
+   "relation": "suffers_from",
+   "note": "Overparameterization makes quantization-based deletion perform poorly; approximate deletion may be needed instead.",
+   "evidence": "App E.2; Sec 6"
+  },
+  {
+   "source": "q-k-means",
+   "target": "high-dimensional-instability",
+   "relation": "suffers_from",
+   "note": "Deletion time scales as d^{5/2}; on MNIST it gives only a 2.2x speedup with frequent retrains.",
+   "evidence": "Theorem 4.1; Fig 2; Sec 5.2"
+  },
+  {
+   "source": "q-k-means",
+   "target": "adversarial-deletion-requests",
+   "relation": "suffers_from",
+   "note": "An adversary who always deletes initial centroids forces a retrain on every request.",
+   "evidence": "App A.1"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "adversarial-deletion-requests",
+   "relation": "suffers_from",
+   "note": "Targeting one leaf breaks distributional equality, though not efficiency.",
+   "evidence": "App A.1"
+  },
+  {
+   "source": "q-k-means",
+   "target": "dc-k-means",
+   "relation": "contrasts_with",
+   "note": "Q-k-means gains more at low d/n; DC-k-means is more consistent across dimensions and its speedup grows with n.",
+   "evidence": "Sec 5.2"
+  },
+  {
+   "source": "q-k-means",
+   "target": "deletion-performance-tradeoff",
+   "relation": "suffers_from",
+   "note": "Smaller epsilon improves loss but raises deletion time like 1/epsilon.",
+   "evidence": "Theorem 4.1; Cor 4.1.1; Figs 3, 5"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "deletion-performance-tradeoff",
+   "relation": "suffers_from",
+   "note": "Larger width w tends to hurt loss; runtime is minimized at an intermediate w.",
+   "evidence": "App D.3.2-D.3.3; Figs 4, 6"
+  },
+  {
+   "source": "retrain-from-scratch",
+   "target": "unlearning-cost",
+   "relation": "suffers_from",
+   "note": "Each request costs a full O(nkTd) training run.",
+   "evidence": "Sec 1; App C.1"
+  },
+  {
+   "source": "retrain-from-scratch",
+   "target": "data-deletion-operation",
+   "relation": "is_a",
+   "note": "Every algorithm trivially supports exact deletion by retraining; the challenge is purely computational.",
+   "evidence": "Sec 3 'A Computational Challenge'"
+  },
+  {
+   "source": "lloyds-algorithm",
+   "target": "k-means-clustering",
+   "relation": "addresses",
+   "note": "The canonical heuristic for the k-means objective.",
+   "evidence": "Sec 4"
+  },
+  {
+   "source": "k-means-clustering",
+   "target": "clustering",
+   "relation": "is_a",
+   "note": "k-means is the main clustering formulation studied.",
+   "evidence": "Sec 4"
+  },
+  {
+   "source": "exact-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "Exact deletion is the strict form of unlearning.",
+   "evidence": "Sec 3"
+  },
+  {
+   "source": "approximate-unlearning",
+   "target": "machine-unlearning",
+   "relation": "is_a",
+   "note": "A relaxation that bounds the divergence from retraining.",
+   "evidence": "Sec 3; App A.2"
+  },
+  {
+   "source": "machine-unlearning",
+   "target": "right-to-be-forgotten",
+   "relation": "motivated_by",
+   "note": "Regulation requires honoring requests to withdraw consent.",
+   "evidence": "Sec 1"
+  },
+  {
+   "source": "right-to-be-forgotten",
+   "target": "data-privacy",
+   "relation": "part_of",
+   "note": "One component of individuals' control over their data.",
+   "evidence": "Sec 1"
+  },
+  {
+   "source": "differential-privacy",
+   "target": "data-privacy",
+   "relation": "is_a",
+   "note": "A formal privacy technique listed among related ideas.",
+   "evidence": "Sec 2"
+  },
+  {
+   "source": "data-deletion-operation",
+   "target": "exact-unlearning",
+   "relation": "is_a",
+   "note": "Formalizes exact unlearning as equality in distribution with A(D_{-i}).",
+   "evidence": "Definition 3.1"
+  },
+  {
+   "source": "data-deletion-operation",
+   "target": "unlearning-guarantee",
+   "relation": "is_a",
+   "note": "The deletion guarantee required throughout the paper, compared to perfect secrecy in cryptography.",
+   "evidence": "Def A.2; App A.1 one-time-pad analogy"
+  },
+  {
+   "source": "robust-data-deletion",
+   "target": "data-deletion-operation",
+   "relation": "extends",
+   "note": "Requires the equality even for adversarially chosen indices.",
+   "evidence": "Definition A.3"
+  },
+  {
+   "source": "robust-data-deletion",
+   "target": "adversarial-deletion-requests",
+   "relation": "addresses",
+   "note": "Formalizes correctness against an eavesdropping adversary who issues deletions.",
+   "evidence": "App A.1"
+  },
+  {
+   "source": "delta-approximate-deletion",
+   "target": "approximate-unlearning",
+   "relation": "is_a",
+   "note": "A one-sided multiplicative bound between deletion and retraining distributions.",
+   "evidence": "Definition A.6"
+  },
+  {
+   "source": "delta-approximate-deletion",
+   "target": "data-deletion-operation",
+   "relation": "extends",
+   "note": "Relaxes exact distributional equality.",
+   "evidence": "Sec 3; App A.2"
+  },
+  {
+   "source": "differential-privacy",
+   "target": "delta-approximate-deletion",
+   "relation": "enables",
+   "note": "Privatizing the model and ignoring deletions could give approximate deletion, but DP does not hide n and needs group privacy budgets fixed at training time.",
+   "evidence": "App A.2.1"
+  },
+  {
+   "source": "amortized-runtime-lower-bound",
+   "target": "online-data-deletion",
+   "relation": "part_of",
+   "note": "The lower bound arises naturally in the online deletion setting.",
+   "evidence": "Remark 3.1"
+  },
+  {
+   "source": "deletion-efficiency",
+   "target": "amortized-runtime-lower-bound",
+   "relation": "builds_on",
+   "note": "alpha-deletion efficient means achieving O(n^{1-alpha}), matching Omega(n/m) at m = n^alpha.",
+   "evidence": "Def A.5"
+  },
+  {
+   "source": "online-data-deletion",
+   "target": "amortized-runtime",
+   "relation": "measures_with",
+   "note": "Cost is the expected total runtime divided by the number of deletions.",
+   "evidence": "Def A.4"
+  },
+  {
+   "source": "quantized-centroid-stability-lemma",
+   "target": "random-lattice-boundary-lemma",
+   "relation": "builds_on",
+   "note": "Applies Lemma C.2 with epsilon' = mk*sqrt(d)/(gamma*n), then a union bound over iterations and centroids.",
+   "evidence": "Proof of Lemma C.3"
+  },
+  {
+   "source": "random-lattice-boundary-lemma",
+   "target": "random-phase-lattice-quantization",
+   "relation": "uses",
+   "note": "The random phase makes a point uniform within its lattice cell, so the boundary probability is computable.",
+   "evidence": "Proof of Lemma C.2"
+  },
+  {
+   "source": "quantized-centroid-stability-lemma",
+   "target": "gamma-balance-correction",
+   "relation": "uses",
+   "note": "The correction guarantees an effective cluster mass of at least gamma*n/k, which bounds centroid movement.",
+   "evidence": "Proof of Lemma C.3"
+  },
+  {
+   "source": "q-k-means-deletion-time-theorem",
+   "target": "quantized-centroid-stability-lemma",
+   "relation": "builds_on",
+   "note": "Expected time = check cost + Pr[instability] x retrain cost, with the probability bounded by Lemma C.3.",
+   "evidence": "App C.1 Proof (Runtime)"
+  },
+  {
+   "source": "q-k-means-deletion-time-theorem",
+   "target": "q-k-means",
+   "relation": "part_of",
+   "note": "The main runtime guarantee for Q-k-means deletion.",
+   "evidence": "Theorem 4.1"
+  },
+  {
+   "source": "q-k-means-loss-bound",
+   "target": "q-k-means",
+   "relation": "part_of",
+   "note": "Statistical-performance guarantee for Q-k-means.",
+   "evidence": "Corollary 4.1.1"
+  },
+  {
+   "source": "q-k-means-loss-bound",
+   "target": "k-means-plus-plus-guarantee",
+   "relation": "builds_on",
+   "note": "Adds the worst-case rounding penalty to the (8 ln k + 16) L* bound.",
+   "evidence": "App C.2.1"
+  },
+  {
+   "source": "q-k-means-loss-bound",
+   "target": "approximation-guarantee",
+   "relation": "is_a",
+   "note": "Multiplicative plus additive approximation to the optimal loss.",
+   "evidence": "Corollary 4.1.1"
+  },
+  {
+   "source": "k-means-plus-plus-guarantee",
+   "target": "approximation-guarantee",
+   "relation": "is_a",
+   "note": "An O(log k) expected approximation ratio.",
+   "evidence": "Theorem C.4"
+  },
+  {
+   "source": "k-means-plus-plus-guarantee",
+   "target": "k-means-plus-plus",
+   "relation": "builds_on",
+   "note": "The guarantee is a property of k-means++ seeding.",
+   "evidence": "Sec 4.1 [5]"
+  },
+  {
+   "source": "dc-k-means-deletion-time-proposition",
+   "target": "dc-k-means",
+   "relation": "part_of",
+   "note": "The main runtime guarantee for DC-k-means deletion.",
+   "evidence": "Proposition 4.2"
+  },
+  {
+   "source": "dc-k-means-deletion-time-proposition",
+   "target": "random-leaf-partitioning",
+   "relation": "uses",
+   "note": "Expected size of a random point's leaf comes from the Binomial(n, n^{-rho}) second moment: O(n^{1-rho}).",
+   "evidence": "App C.2.2 Proof (Runtime)"
+  },
+  {
+   "source": "q-k-means-alpha-efficiency",
+   "target": "q-k-means-deletion-time-theorem",
+   "relation": "builds_on",
+   "note": "Substitutes epsilon = n^{-beta} and m = n^alpha into Theorem 4.1 and amortizes.",
+   "evidence": "App C.2.3"
+  },
+  {
+   "source": "q-k-means-alpha-efficiency",
+   "target": "deletion-efficiency",
+   "relation": "is_a",
+   "note": "A sufficient condition for alpha-deletion efficiency.",
+   "evidence": "Corollary 4.2.1"
+  },
+  {
+   "source": "dc-k-means-alpha-efficiency",
+   "target": "dc-k-means-deletion-time-proposition",
+   "relation": "builds_on",
+   "note": "Amortizes the Proposition 4.2 cost plus O(n) training.",
+   "evidence": "App C.2.4"
+  },
+  {
+   "source": "dc-k-means-alpha-efficiency",
+   "target": "deletion-efficiency",
+   "relation": "is_a",
+   "note": "A sufficient condition for alpha-deletion efficiency of DC-k-means.",
+   "evidence": "Corollary 4.2.2"
+  },
+  {
+   "source": "q-k-means",
+   "target": "botnet-n-baiot",
+   "relation": "evaluates_on",
+   "note": "Best case: 584x speedup (1.04 s vs 607.8 s amortized) with loss ratio 1.018.",
+   "evidence": "Tables 1, 4"
+  },
+  {
+   "source": "q-k-means",
+   "target": "mnist",
+   "relation": "evaluates_on",
+   "note": "Worst case: 2.2x speedup due to high dimension relative to n; loss ratio 1.11.",
+   "evidence": "Tables 1, 4; Fig 2"
+  },
+  {
+   "source": "dc-k-means",
+   "target": "mnist",
+   "relation": "evaluates_on",
+   "note": "25.4x speedup with loss ratio 1.014, showing robustness to dimension.",
+   "evidence": "Tables 1, 4"
+  }
+ ],
+ "cross_paper": [
+  {
+   "target_paper": "bourtoule2021-sisa",
+   "relation": "same_problem",
+   "note": "SISA (2021) also targets exact unlearning cheaper than full retraining. Its sharding and isolation scale up this paper's modularity principle (DC-k-means' random leaves) to deep networks. To my knowledge SISA discusses Ginart et al. as prior work; this 2019 paper cannot cite SISA.",
+   "explicit": false
+  },
+  {
+   "target_paper": "pan2023-mufc",
+   "relation": "same_problem",
+   "note": "MUFC takes exact unlearning for k-means-style clustering into the federated setting. Its clients-plus-server aggregation of local centroids resembles depth-1 DC-k-means. Whether MUFC adopts this paper's definitions or baselines cannot be checked from this paper, which came earlier.",
+   "explicit": false
+  },
+  {
+   "target_paper": "makkar2023-mfc",
+   "relation": "complementary",
+   "note": "MFC's federated clustering, in which clients cluster locally and the server clusters the uploaded centroids, has the same structure as depth-1 DC-k-means with clients as leaves. DC-k-means' leaf-to-root deletion is therefore a direct template for adding unlearning to MFC.",
+   "explicit": false
+  },
+  {
+   "target_paper": "gupta2024-ffc",
+   "relation": "complementary",
+   "note": "Fair federated clustering through personalization has no deletion mechanism. Q-k-means quantization and DC-style modular recomputation are candidate tools for making it deletion-efficient.",
+   "explicit": false
+  },
+  {
+   "target_paper": "kadhe2023-fairsisa",
+   "relation": "complementary",
+   "note": "FairSISA builds on SISA-style exact unlearning (a descendant of this paper's modularity principle) and adds fairness post-processing to the shard ensemble.",
+   "explicit": false
+  },
+  {
+   "target_paper": "wen2026-fedshard",
+   "relation": "complementary",
+   "note": "FedShard pursues efficient exact-style federated unlearning through sharding, extending the modularity principle. Its efficiency fairness goal relates to this paper's amortized-cost view of deletion.",
+   "explicit": false
+  },
+  {
+   "target_paper": "adhikari2025-uncle",
+   "relation": "complementary",
+   "note": "UnCLe handles unlearning in continual learning. This paper supplies the exact-deletion definition and amortized-cost framework against which such approximate deep-learning methods can be judged.",
+   "explicit": false
+  },
+  {
+   "target_paper": "rachapudi2026-bidlora",
+   "relation": "complementary",
+   "note": "BID-LoRA confines task or data influence to small adapter modules, a parameter-level form of the modularity principle proposed here.",
+   "explicit": false
+  },
+  {
+   "target_paper": "chen2025-meco",
+   "relation": "complementary",
+   "note": "MeCo (federated continual learning on edge systems) has no deletion component. This paper's principles of modularity and quantized, stable shared knowledge suggest how one could be added.",
+   "explicit": false
+  }
+ ]
+}

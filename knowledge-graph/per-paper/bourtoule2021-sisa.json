@@ -1,0 +1,1559 @@
+{
+  "paper": {
+    "id": "bourtoule2021-sisa",
+    "title": "Machine Unlearning",
+    "short": "SISA",
+    "authors": [
+      "Lucas Bourtoule",
+      "Varun Chandrasekaran",
+      "Christopher A. Choquette-Choo",
+      "Hengrui Jia",
+      "Adelin Travers",
+      "Baiwu Zhang",
+      "David Lie",
+      "Nicolas Papernot"
+    ],
+    "affiliations": [
+      "University of Toronto",
+      "Vector Institute",
+      "University of Wisconsin-Madison"
+    ],
+    "venue": "42nd IEEE Symposium on Security and Privacy (IEEE S&P 2021)",
+    "year": 2021,
+    "arxiv": "1912.03817",
+    "file": "papers/1/2_1912.03817v3.pdf",
+    "one_liner": "SISA trains an ensemble of isolated models on disjoint data shards, checkpointed per slice, so deleting a point only retrains one partial model.",
+    "summary": "When users ask for their data to be deleted (GDPR's right to be forgotten), a trained model may still remember it. The only obviously correct fix, retraining from scratch without that data, is very expensive for deep networks. This paper proposes SISA training (Sharded, Isolated, Sliced, Aggregated). The data is split into S disjoint shards, and one model is trained on each shard in complete isolation. Each shard is further split into R slices that are added to training one at a time, with the weights saved before each new slice. At test time the S models vote. To delete a point, only the model whose shard holds it is retrained, starting from the checkpoint saved just before that point's slice. The result is exactly as if the point had never been used. The authors define unlearning as matching the distribution of models trained without the point, explain why differential privacy cannot provide this, and derive the expected number of points to retrain for sequential and batched requests. Simple tasks see 4.63x (Purchase) and 2.45x (SVHN) speed-ups with under 2 points of accuracy lost. ImageNet gains only 1.36x with large accuracy loss, which transfer learning helps reduce. Knowing who is likely to request deletion enables distribution-aware sharding, which cuts the cost further.",
+    "problem": "Regulations such as the GDPR, CCPA and PIPEDA give individuals a right to have their data erased, and because ML models can memorize training data, erasure must also reach the trained models. Retraining from scratch gives a provable guarantee but is too expensive to repeat for every request on large DNNs. Prior unlearning methods were either limited to non-adaptive statistical-query learners, gave only probabilistic (DP-style) guarantees, or applied only to simple model classes.",
+    "core_idea": "Limit where each training point can have influence. Every point affects only one constituent model (shards trained in isolation), and within that model only the training stages after its slice was added (checkpointed slices). Unlearning then means retraining a small part of the pipeline from a saved state that never saw the point, which gives an exact, easy-to-explain guarantee at a fraction of the retraining cost. Predictions are recovered by aggregating the constituent models, for example with a majority vote.",
+    "setting": "centralized supervised learning (deep neural network classifiers trained with SGD); unlearning requests arrive sequentially or in batches; uniform or known non-uniform request distributions",
+    "unlearning_type": "exact",
+    "contributions": [
+      "A definition of unlearning (Def. III.1): the distribution of models obtained by training on D plus d_u and then unlearning d_u must equal the distribution obtained by training on D alone. The authors also argue why DP with epsilon > 0 cannot give this.",
+      "Six goals for an unlearning strategy: intelligibility, comparable accuracy, reduced unlearning time, provable guarantees, model-agnostic, and limited overhead. These are used to rule out strawman approaches (DP, certified removal, SQ-based unlearning, decremental learning).",
+      "SISA training: Sharding, Isolation, Slicing and Aggregation, which needs only small changes to existing pipelines.",
+      "Analytical expected retraining cost (number of points to retrain) for sharding and slicing, under sequential and batched processing of requests.",
+      "An epoch recalibration rule so that sliced training takes the same total time as unsliced training, with no loss in accuracy.",
+      "An empirical study on MNIST, Purchase, SVHN, CIFAR-100, ImageNet and Mini-ImageNet. For simple tasks SISA loses little accuracy. For complex tasks it loses much more, and transfer learning narrows the gap.",
+      "Distribution-aware sharding (Algorithm 1), which groups likely-to-be-deleted points into a few small shards when the provider knows the request distribution."
+    ],
+    "method_steps": [
+      "Partition the training set D (size N) uniformly at random into S disjoint shards D_1..D_S, each of size about N/S, and record which shard and slice each point belongs to.",
+      "Partition each shard D_k uniformly into R disjoint slices D_k,1..D_k,R.",
+      "For each shard k, independently (no gradient or parameter sharing between shards), train the constituent model M_k incrementally. Step 1: start from a random initialization and train on D_k,1 for e_1 epochs, then save the parameters (M_k,1). Step i: continue from M_k,i-1 and train on the union D_k,1..D_k,i for e_i epochs, then save M_k,i. M_k = M_k,R.",
+      "Set the epochs per step so that total training time matches unsliced training. With e_i = e/R and e' the epochs without slicing, use e = 2R e'/(R+1) (Eq. 1).",
+      "At inference, feed the test input to all S constituent models and aggregate. Use a label majority vote by default, or average the post-softmax prediction vectors and take the argmax (better for complex tasks). The aggregator must not be trained on the training data.",
+      "When an unlearning request for d_u arrives, look up its shard k and slice r. Delete d_u, load the checkpoint M_k,r-1 (the saved state before slice r was introduced), and retrain steps r..R on the updated slices. Replace M_k with the new model. The other shards are untouched.",
+      "Optionally buffer K requests and process them as a batch. Retrain every affected shard, starting from the smallest affected slice index in that shard.",
+      "Optionally, when the distribution of deletion probabilities p(u) is known, use distribution-aware sharding (Algorithm 1). Sort points by p(u) and fill shards in that order, starting a new shard whenever the expected number of deletion requests in the current shard, E(chi_i) = n * mean p(u), reaches a constant C <= 1. This concentrates high-risk points in fewer, smaller shards."
+    ],
+    "key_definitions": [
+      {
+        "name": "Unlearning (Definition III.1)",
+        "plain": "A training mechanism supports unlearning if training on the data plus a point and then unlearning that point produces exactly the same distribution of models as training without the point at all. Because training is random, it compares distributions of models, not individual parameter values.",
+        "formal": "D' = D union {d_u}; D_M = distribution of models from mechanism M trained on D' then unlearning d_u; D_real = distribution of models from M trained on D; M facilitates unlearning iff D_M = D_real"
+      },
+      {
+        "name": "Plausible deniability / certificate",
+        "plain": "The provider must convince the user that the updated model could plausibly have been trained without their data. Here the evidence is the training algorithm itself (e.g. auditable SISA code), not a matching set of weights.",
+        "formal": "M_not_du must be a sample from the distribution of models trained on D \\ d_u"
+      },
+      {
+        "name": "Why DP is not unlearning",
+        "plain": "Epsilon-DP bounds how much any single point can change the model, but the bound is never zero, so a point still has a small influence. Unlearning needs zero influence, which would require epsilon = 0, and then the model could learn nothing from the data.",
+        "formal": "unlearning requires epsilon = 0, which contradicts learnability (violates goal G2)"
+      },
+      {
+        "name": "Shard",
+        "plain": "A disjoint subset of the training data. Each shard gets its own constituent model, and each point belongs to exactly one shard.",
+        "formal": "intersection_k D_k = empty, union_k D_k = D, |D_k| ~ N/S"
+      },
+      {
+        "name": "Slice",
+        "plain": "A disjoint piece of a shard. Slices are added to training one at a time, and the model is checkpointed before each new slice.",
+        "formal": "intersection_i D_k,i = empty, union_i D_k,i = D_k"
+      },
+      {
+        "name": "Constituent model",
+        "plain": "One of the S replicas of the model, trained in isolation on a single shard."
+      },
+      {
+        "name": "Task complexity",
+        "plain": "An informal notion based on input dimensionality, model depth or capacity, and the number of samples per class. MNIST, Purchase and SVHN count as simple; CIFAR-100, ImageNet and Mini-ImageNet count as complex."
+      },
+      {
+        "name": "Batch K baseline",
+        "plain": "Buffer K unlearning requests, then retrain the whole model from scratch. This is the same as SISA with S = R = 1 in the batch setting."
+      },
+      {
+        "name": "1/S fraction (lone shard) baseline",
+        "plain": "Train a single model on a 1/S fraction of the data, discard the rest, and retrain only when a deleted point falls into that fraction."
+      },
+      {
+        "name": "Unlearning goals G1-G6",
+        "plain": "G1 intelligibility, G2 comparable accuracy, G3 provably reduced unlearning time, G4 provable guarantees, G5 model-agnostic, G6 limited overhead."
+      }
+    ],
+    "theory": [
+      {
+        "name": "Eq. 1 (epoch recalibration for slicing)",
+        "statement_plain": "If each of the R slice-steps is trained for an equal share e_i = e/R of e total epochs, the work matches unsliced training on D = N/S points for e' epochs exactly when e = 2R e'/(R+1).",
+        "assumptions": "Training time depends only on the number of samples processed; each slice-step is trained equally long.",
+        "significance": "Lets sliced and unsliced models be compared at equal training time. Under this rule slicing showed no accuracy loss (Fig. 5)."
+      },
+      {
+        "name": "Best-case single-request speed-up",
+        "statement_plain": "For a single request, sharding gives an expected S times speed-up over full retraining, slicing gives a best-case speed-up of up to (R+1)/2, and the two combined give a best-case (R+1)S/2.",
+        "assumptions": "Uniform shards and slices; retraining time linear in the number of points; parallelism ignored.",
+        "significance": "The headline intuition for the design. Note it is a best case: the expected slicing gain under uniform requests (Eq. 4) is at most 1.5x."
+      },
+      {
+        "name": "Eq. 2 (sequential sharding cost)",
+        "statement_plain": "With S uniform shards and K requests processed one at a time, the expected total number of points to retrain is E[C] = (N/S + 1/(2S) - 1) K - K^2/(2S). It is upper-bounded by N K / S, which is tight when K -> 0 and N/S >> 1, so doubling S halves the cost. As K -> N the quadratic term dominates.",
+        "assumptions": "Data shuffled and evenly split; each request hits any shard with probability 1/S; shard sizes stay roughly constant. Derived via binomial sums (App. D).",
+        "significance": "Closed-form cost model showing a linear gain in S for small K."
+      },
+      {
+        "name": "Eq. 3 (batched sharding cost)",
+        "statement_plain": "If K requests are processed as one batch, the expected number of points to retrain is E[C] = N(1 - (1 - 1/S)^K) - K. For small K this is about N(1 - exp(-K/tau)) with tau = (-ln(1 - 1/S))^-1, and it approaches N - K as K grows. So the benefit of sharding disappears once K is comparable to S.",
+        "assumptions": "Shard index of each request i.i.d. uniform; the number of hits per shard is Binomial(K, 1/S) (App. E). The main text prints exp(K/tau), apparently a sign typo; App. I uses exp(-K/tau).",
+        "significance": "Explains the empirical rule that the gains vanish when K > 3S."
+      },
+      {
+        "name": "Eq. 4 (sequential slicing cost)",
+        "statement_plain": "For one request landing uniformly in one of R slices of a shard with D points, the expected retraining work is E[C] = e'D(2/3 + 1/(3R)). With R = 1 this is e'D (no gain). As R -> infinity it tends to (2/3)e'D, so the expected speed-up from slicing alone is at most 1.5x.",
+        "assumptions": "Uniform requests; epoch recalibration from Eq. 1; points per slice D/R constant (gives an upper bound); App. F.",
+        "significance": "Slicing gives a modest but free speed-up, with diminishing returns (it plateaus for R > 20)."
+      },
+      {
+        "name": "Eq. 5 (batched slicing cost)",
+        "statement_plain": "For K batched requests within a shard, retraining starts from the smallest affected slice index r_min: E[C] = (2e'D/(R(R+1))) * (R(R+1)/2 - (E[r_min^2] - E[r_min])/2). The moments come from the expected minimum of n uniform draws, E[min] = (na+b)/(n+1) (App. G). When K >> R the cost is about e'D (no speed-up). For K << R there is a significant speed-up.",
+        "assumptions": "Requests are sampled uniformly with replacement (verified numerically to be harmless when K << N); App. H.",
+        "significance": "Shows slicing helps only when the batch is small relative to R."
+      },
+      {
+        "name": "Lone-shard (1/S fraction) baseline cost (App. I)",
+        "statement_plain": "In the sequential setting the lone-shard baseline costs a factor 1/S of SISA's cost (Eq. 19), i.e. it is S times faster. In the batched setting E[C] = (N - K)/S.",
+        "assumptions": "Same as Eq. 2-3.",
+        "significance": "Training on less data is always faster to unlearn. The case for SISA rests on its much better accuracy, especially on complex tasks."
+      },
+      {
+        "name": "Empirical linearity of training time",
+        "statement_plain": "Training time grows linearly with the number of training samples. This was measured on SVHN, Purchase and MNIST on an RTX 2080 Ti, 5 repetitions (Fig. 3).",
+        "assumptions": "Fixed hardware and software stack.",
+        "significance": "Justifies using the number of points to retrain as a hardware-independent proxy for unlearning time throughout the analysis."
+      }
+    ],
+    "complexity": "Training: the total cost equals that of a single model when slice epochs are recalibrated (Eq. 1). Shards could be trained in parallel, but the paper deliberately does not count this. Storage: R checkpoints per shard, O(SR) saved parameter states, linear in the number of slices. This is argued to be cheap (about $0.023-0.058/GB/month versus GPU rental at $0.25-0.90/hour), and checkpointing is already common practice. Hyperparameter tuning: O(SR) models in general, O(R) when shards are uniform and share hyperparameters. Unlearning one request: retrain one constituent on at most N/S points. Expected cost is roughly N K/S points for K sequential requests (Eq. 2), with an extra slicing factor of (2/3 + 1/(3R)) per request (Eq. 4). Batched cost is N(1-(1-1/S)^K) - K (Eq. 3). Inference: S constituent forward passes plus aggregation. This is not analyzed in the paper (my observation).",
+    "experiments": {
+      "datasets": [
+        "MNIST (60k, 28x28, 10 classes)",
+        "Purchase (250k, 600 features, 2 classes per Table I; curated following Shokri et al. from the top 600 purchased items)",
+        "SVHN (604,833, 32x32x3, 10 classes)",
+        "CIFAR-100 (60k, 100 classes; used for transfer learning)",
+        "ImageNet (1,281,167, 224x224x3, 1000 classes)",
+        "Mini-ImageNet (128,545, 224x224x3, 100 classes; supervised version)"
+      ],
+      "models": [
+        "MNIST: 2 conv + 2 FC layers",
+        "Purchase: 2 FC layers (MLP)",
+        "SVHN: Wide ResNet-1-1",
+        "CIFAR-100 / ImageNet / Mini-ImageNet: ResNet-50"
+      ],
+      "baselines": [
+        "Retrain from scratch / batch K baseline (SISA with S = R = 1)",
+        "1/S fraction (lone shard) baseline: train on only one shard's worth of data"
+      ],
+      "metrics": [
+        "Test accuracy (top-1, top-5)",
+        "Speed-up in retraining time",
+        "Number of points to retrain (proxy for unlearning time)",
+        "Analytical retraining time"
+      ],
+      "headline_results": [
+        "Purchase: 4.63x speed-up over retraining from scratch for 8 unlearning requests (about 0.003% of the data) with S = 20 shards and R = 50 slices, losing under 2 percentage points (PP) of accuracy.",
+        "SVHN: 2.45x speed-up for 18 requests (about 0.003%) with S = 20, R = 50, losing under 2 PP of accuracy.",
+        "ImageNet (ResNet-50): 1.36x speed-up for 39 requests with the same S and R, but a top-5 accuracy drop of 19.45 PP.",
+        "Mini-ImageNet: 8.01x speed-up for 4 requests, with a 16.7 PP accuracy drop (footnote 1).",
+        "ImageNet with label majority vote: average top-5 accuracy drop of 16.14 PP (batch K top-5 = 92.87%) and average top-1 drop of 18.76 PP (batch K top-1 = 76.15%). Averaging prediction vectors instead improves top-1 by 1.68 PP and top-5 by 4.37 PP, cutting the top-5 gap to 11.77 PP. The same pattern holds on Mini-ImageNet.",
+        "Transfer learning (ResNet-50 pretrained on ImageNet, transferred to CIFAR-100): at S = 10 the top-1 gap shrinks to about 4 PP and the top-5 gap to under 1 PP.",
+        "Simple tasks: more than 20 shards costs over 5 PP of accuracy, and more than K = 3S requests makes retraining time fall back to the batch K baseline.",
+        "Regime: sharding gives most of its benefit when the number of requests is below 0.075% of the dataset; with S fixed to 20, slicing helps only below 0.003%. Google's right-to-be-forgotten data (Bertram et al.) suggests real request rates are around 1e-6 of the dataset, and the paper says this is 3 orders of magnitude more requests than prior work handled.",
+        "Slicing does not reduce accuracy once epochs are recalibrated (Fig. 5, SVHN and Purchase). Combined speed-up at 0.003% requests grows almost proportionally with S, while extra slices give diminishing returns (Fig. 7, roughly 2x on SVHN and 4x on Purchase at S, R up to about 20; read from the figure).",
+        "Distribution-aware sharding (SVHN, three simulated countries with p = 3e-6, 3e-5, 6e-6 and data fractions 0.7717, 0.1001, 0.1282): creates 19 shards and lowers the expected number of points to retrain. Accuracy is 94.4% versus 95.7% for uniform sharding.",
+        "Aggregation choice barely matters on easy datasets (Purchase, SVHN). On ImageNet and Mini-ImageNet, averaging prediction vectors recovers noticeably more accuracy (Figs. 13-14).",
+        "Accuracy falls as the average number of samples per class per shard falls (Fig. 15)."
+      ]
+    },
+    "limitations": [
+      "Constituents are weak learners: accuracy drops sharply on complex tasks (ImageNet top-5 down by 16-19 PP), and even simple tasks lose more than 5 PP once S > 20.",
+      "Speed-ups exist only in a narrow regime (K < 3S; requests below 0.003-0.075% of the dataset). For larger K, SISA degrades to the cost of full retraining.",
+      "The cost analysis assumes requests are uniform and independent, shard and slice sizes stay constant, and retraining time is linear in the number of samples.",
+      "Slicing only works for stateful iterative learners such as SGD-trained models. It does not help greedy learners such as decision trees.",
+      "Slicing needs extra storage for O(SR) checkpoints, and hyperparameters may need re-tuning for sharded or sliced training (slices interact with batch size).",
+      "Distribution-aware sharding needs a precisely known and stationary request distribution. It produces shards of unequal size, which costs about 1.3 PP of accuracy under majority vote, and grouping users by deletion likelihood may harm fairness.",
+      "The provider is assumed honest. There is no way to verify externally that unlearning happened, only an audit of the code.",
+      "Learned aggregators (e.g. a mixture-of-experts style controller) would themselves need unlearning, so SISA is restricted to aggregation that does not use the training data.",
+      "Ensemble inference costs S forward passes and S models' worth of serving memory, which the paper does not discuss (my observation).",
+      "The best-case slicing speed-up of (R+1)/2 can be confused with the expected speed-up, which is at most 1.5x under uniform requests (Eq. 4) (my observation).",
+      "Minor inconsistencies in the text: the contributions claim about a 2 PP drop with transfer learning, but Sec. VII-C reports about 4 PP top-1 (and under 1 PP top-5) at S = 10. The text calls 95.7% vs 94.4% 'one percent point'. The asymptotic form of Eq. 3 is printed with exp(K/tau)."
+    ],
+    "future_work": [
+      "Aggregation strategies beyond majority vote that cope with imbalanced shard sizes (for distribution-aware sharding).",
+      "Data replication across shards to strengthen constituents, while limiting replication of points likely to be deleted.",
+      "Coreset selection, to cut learning and therefore unlearning cost.",
+      "Verifiable unlearning when the service provider is not trusted.",
+      "The ethical and fairness implications of grouping users by likelihood of deletion.",
+      "Better partitioning and aggregation for complex learning tasks; unlearning without isolation."
+    ],
+    "relevance_to_efficient_unlearning": "SISA is the canonical exact-unlearning baseline that most later efficient-unlearning papers compare against or extend, so the student should be able to reproduce it, cost model included. Its closed-form expected retraining costs (Eqs. 2-5) are ready-made theory tools for analyzing any partition-based scheme, and its definition gives a clean way to argue exactness. The main pitfalls are the accuracy cost on complex tasks, the narrow regime where speed-ups exist (K < 3S), and its dependence on uniform request distributions. Each is a natural starting point for an improved algorithm. The shard/slice/checkpoint idea carries directly over to federated (clients as shards), continual (tasks as slices) and LoRA-based settings, which other papers in this collection explore.",
+    "open_questions": [
+      "Design sharding schemes (class-balanced, clustering-based, or with deletion-aware replication) that keep constituent accuracy high on complex tasks without breaking exactness.",
+      "Develop aggregation rules for heterogeneous or imbalanced shards that are either independent of the training data or cheaply unlearnable themselves.",
+      "Build hybrid schemes that use exact SISA retraining for some requests and certified or approximate per-shard updates for others, and analyze the combined cost and guarantee.",
+      "Adapt distribution-aware sharding when the request distribution is unknown or drifts over time (online re-sharding), with fairness constraints across user groups.",
+      "Cut slicing's storage cost, e.g. by storing parameter-efficient (LoRA) deltas per slice, and extend the cost model to count storage and inference.",
+      "Find mechanisms that let a user verify or audit that SISA unlearning actually happened without trusting the provider."
+    ]
+  },
+  "nodes": [
+    {
+      "id": "machine-unlearning",
+      "label": "Machine Unlearning",
+      "type": "topic",
+      "description": "Removing the influence of specific training data from a trained model after the fact, typically in response to deletion requests.",
+      "aliases": [
+        "unlearning",
+        "data deletion in ML"
+      ]
+    },
+    {
+      "id": "exact-unlearning",
+      "label": "Exact Unlearning",
+      "type": "topic",
+      "description": "Unlearning whose result is identical (in distribution) to a model retrained from scratch without the deleted data.",
+      "aliases": [
+        "exact deletion",
+        "perfect unlearning"
+      ]
+    },
+    {
+      "id": "approximate-unlearning",
+      "label": "Approximate Unlearning",
+      "type": "topic",
+      "description": "Unlearning that only approximately matches the retrained model, trading guarantee strength for efficiency.",
+      "aliases": []
+    },
+    {
+      "id": "certified-unlearning",
+      "label": "Certified Unlearning",
+      "type": "topic",
+      "description": "Approximate unlearning with a formal, usually DP-style (epsilon, delta) indistinguishability guarantee relative to retraining.",
+      "aliases": [
+        "certified removal",
+        "certified data removal"
+      ]
+    },
+    {
+      "id": "right-to-be-forgotten",
+      "label": "Right to be Forgotten",
+      "type": "topic",
+      "description": "Legal right (GDPR, CCPA, PIPEDA) of individuals to have organizations erase their personal data.",
+      "aliases": [
+        "right to erasure",
+        "GDPR Article 17"
+      ]
+    },
+    {
+      "id": "data-privacy",
+      "label": "Data Privacy",
+      "type": "topic",
+      "description": "Protection of personal information about individuals in datasets and in models trained on them.",
+      "aliases": [
+        "privacy"
+      ]
+    },
+    {
+      "id": "differential-privacy",
+      "label": "Differential Privacy",
+      "type": "topic",
+      "description": "A formal privacy definition bounding by epsilon how much any single record can change an algorithm's output distribution.",
+      "aliases": [
+        "DP",
+        "epsilon-differential privacy"
+      ]
+    },
+    {
+      "id": "ensemble-learning",
+      "label": "Ensemble Learning",
+      "type": "topic",
+      "description": "Combining predictions of multiple models to improve accuracy or robustness.",
+      "aliases": [
+        "ensembles"
+      ]
+    },
+    {
+      "id": "statistical-query-learning",
+      "label": "Statistical Query Learning",
+      "type": "topic",
+      "description": "Learning model in which the learner accesses data only through aggregate statistical queries rather than individual examples.",
+      "aliases": [
+        "SQ learning"
+      ]
+    },
+    {
+      "id": "transfer-learning",
+      "label": "Transfer Learning",
+      "type": "topic",
+      "description": "Reusing a model pretrained on one (often public) task or dataset as the starting point for a different target task.",
+      "aliases": [
+        "fine-tuning from pretrained model"
+      ]
+    },
+    {
+      "id": "distributed-training",
+      "label": "Distributed Training",
+      "type": "topic",
+      "description": "Training a model across multiple workers that each process part of the data and typically share gradients or parameters.",
+      "aliases": [
+        "data-parallel training"
+      ]
+    },
+    {
+      "id": "sisa",
+      "label": "SISA Training",
+      "type": "method",
+      "description": "Sharded, Isolated, Sliced, Aggregated training: an ensemble of models trained in isolation on disjoint shards with per-slice checkpoints, enabling exact unlearning by partial retraining.",
+      "aliases": [
+        "SISA",
+        "Sharded Isolated Sliced Aggregated"
+      ]
+    },
+    {
+      "id": "data-sharding",
+      "label": "Data Sharding",
+      "type": "method",
+      "description": "Partitioning a training set into disjoint subsets (shards), each used to train a separate model.",
+      "aliases": [
+        "sharding"
+      ]
+    },
+    {
+      "id": "shard-isolation",
+      "label": "Isolated Training",
+      "type": "method",
+      "description": "Training constituent models with no exchange of gradients or parameters, so a data point's influence is confined to one model.",
+      "aliases": [
+        "isolation"
+      ]
+    },
+    {
+      "id": "data-slicing",
+      "label": "Data Slicing",
+      "type": "method",
+      "description": "Splitting a shard into ordered slices that are added incrementally during training, with a checkpoint saved before each slice.",
+      "aliases": [
+        "slicing",
+        "incremental slice training"
+      ]
+    },
+    {
+      "id": "checkpointing",
+      "label": "Checkpointing",
+      "type": "method",
+      "description": "Saving model parameter states during training so training can be resumed from an earlier state.",
+      "aliases": [
+        "model checkpoints"
+      ]
+    },
+    {
+      "id": "model-ensembling",
+      "label": "Model Ensembling / Aggregation",
+      "type": "method",
+      "description": "Combining the outputs of several trained models into one prediction (e.g. voting or averaging).",
+      "aliases": [
+        "aggregation",
+        "ensemble aggregation"
+      ]
+    },
+    {
+      "id": "majority-vote-aggregation",
+      "label": "Label Majority Vote",
+      "type": "method",
+      "description": "Aggregation where each model votes for one label and the most frequent label is output.",
+      "aliases": [
+        "plurality vote",
+        "label aggregation"
+      ]
+    },
+    {
+      "id": "prediction-vector-aggregation",
+      "label": "Prediction-Vector Averaging",
+      "type": "method",
+      "description": "Aggregation that averages models' post-softmax probability vectors and outputs the argmax class.",
+      "aliases": [
+        "soft voting",
+        "probability averaging"
+      ]
+    },
+    {
+      "id": "learned-aggregation-controller",
+      "label": "Learned Aggregation Controller",
+      "type": "method",
+      "description": "A trained gating model (as in mixture-of-experts) that reweights constituent models' predictions per input.",
+      "aliases": [
+        "mixture-of-experts gating",
+        "controller model"
+      ]
+    },
+    {
+      "id": "distribution-aware-sharding",
+      "label": "Distribution-Aware Sharding",
+      "type": "method",
+      "description": "Constructing shards using known per-point deletion probabilities so that likely-to-be-deleted points are concentrated in few, small shards.",
+      "aliases": [
+        "Algorithm 1 ShardData",
+        "adaptive sharding"
+      ]
+    },
+    {
+      "id": "retrain-from-scratch",
+      "label": "Retrain from Scratch",
+      "type": "method",
+      "description": "The naive exact-unlearning baseline: discard the model and retrain on the remaining data.",
+      "aliases": [
+        "naive retraining",
+        "batch K baseline"
+      ]
+    },
+    {
+      "id": "lone-shard-baseline",
+      "label": "1/S Fraction (Lone Shard) Baseline",
+      "type": "method",
+      "description": "Training a single model on only a 1/S fraction of the data and retraining it only when a deleted point lies in that fraction.",
+      "aliases": [
+        "1/S fraction baseline"
+      ]
+    },
+    {
+      "id": "batched-unlearning",
+      "label": "Batched Unlearning Requests",
+      "type": "method",
+      "description": "Buffering several deletion requests and processing them together in one retraining pass, instead of one at a time.",
+      "aliases": [
+        "batch setting",
+        "batch K requests"
+      ]
+    },
+    {
+      "id": "influence-functions",
+      "label": "Influence Functions",
+      "type": "method",
+      "description": "Second-order (Hessian-based) estimates of how upweighting or removing a training point changes model parameters or predictions.",
+      "aliases": []
+    },
+    {
+      "id": "newton-step-certified-removal",
+      "label": "Newton-Step Certified Removal",
+      "type": "method",
+      "description": "Removing a point via a one-step Newton update and masking the residual with added noise, giving a DP-style removal certificate (Guo et al.).",
+      "aliases": [
+        "certified data removal (Guo et al.)"
+      ]
+    },
+    {
+      "id": "sq-unlearning",
+      "label": "SQ-based Unlearning (Cao & Yang)",
+      "type": "method",
+      "description": "Unlearning by expressing learning as summations of statistical queries, so deleting a point only requires updating those sums.",
+      "aliases": [
+        "Towards making systems forget",
+        "summation-form unlearning"
+      ]
+    },
+    {
+      "id": "quantized-k-means",
+      "label": "Quantized k-Means (Q-k-means)",
+      "type": "method",
+      "description": "A deletion-efficient k-means variant that quantizes centroids so most deletions leave the model unchanged (Ginart et al.).",
+      "aliases": [
+        "Q-k-means"
+      ]
+    },
+    {
+      "id": "stochastic-gradient-descent",
+      "label": "Stochastic Gradient Descent",
+      "type": "method",
+      "description": "Iterative optimizer updating parameters with gradients computed on random mini-batches; a stateful algorithm that can continue from a saved state.",
+      "aliases": [
+        "SGD"
+      ]
+    },
+    {
+      "id": "coreset-selection",
+      "label": "Coreset Selection",
+      "type": "method",
+      "description": "Choosing a small subset of training data that yields a model nearly as good as one trained on the full dataset.",
+      "aliases": [
+        "core-sets"
+      ]
+    },
+    {
+      "id": "data-replication",
+      "label": "Data Replication across Shards",
+      "type": "method",
+      "description": "Placing copies of some points in multiple shards to strengthen constituent models.",
+      "aliases": []
+    },
+    {
+      "id": "unlearning-cost",
+      "label": "Unlearning Cost",
+      "type": "problem",
+      "description": "Computational and time cost of removing data from a trained model; for naive retraining it equals the cost of full training.",
+      "aliases": [
+        "retraining cost",
+        "unlearning overhead"
+      ]
+    },
+    {
+      "id": "utility-degradation",
+      "label": "Utility Degradation",
+      "type": "problem",
+      "description": "Loss of model accuracy or usefulness caused by an unlearning method or its training constraints.",
+      "aliases": [
+        "accuracy degradation",
+        "accuracy gap"
+      ]
+    },
+    {
+      "id": "weak-learners",
+      "label": "Weak Constituent Learners",
+      "type": "problem",
+      "description": "Models trained on small data subsets that generalize worse than one model trained on all data, especially for high-capacity models and few samples per class.",
+      "aliases": [
+        "weak learner",
+        "small-shard overfitting"
+      ]
+    },
+    {
+      "id": "task-complexity",
+      "label": "Task Complexity",
+      "type": "problem",
+      "description": "Informal difficulty of a learning task, driven by input dimensionality, required model depth, and samples per class.",
+      "aliases": [
+        "simple vs complex learning tasks"
+      ]
+    },
+    {
+      "id": "training-stochasticity",
+      "label": "Stochasticity in Training and Learning",
+      "type": "problem",
+      "description": "Randomness from mini-batch sampling, data ordering, nondeterministic parallelism and many equally good minima, which makes the effect of a single point hard to trace.",
+      "aliases": [
+        "training nondeterminism"
+      ]
+    },
+    {
+      "id": "training-data-memorization",
+      "label": "Training Data Memorization",
+      "type": "problem",
+      "description": "Models retaining information about specific training examples that can later be extracted.",
+      "aliases": [
+        "unintended memorization"
+      ]
+    },
+    {
+      "id": "privacy-leakage",
+      "label": "Privacy Leakage",
+      "type": "problem",
+      "description": "Exposure of sensitive information about training data through a model's parameters or outputs (e.g. model inversion, membership inference).",
+      "aliases": [
+        "privacy attacks"
+      ]
+    },
+    {
+      "id": "poisoning-attack",
+      "label": "Poisoning Attack",
+      "type": "problem",
+      "description": "Adversarial injection of malicious training data to corrupt a model's behaviour.",
+      "aliases": [
+        "data poisoning"
+      ]
+    },
+    {
+      "id": "hyperparameter-search-overhead",
+      "label": "Hyperparameter Re-tuning Overhead",
+      "type": "problem",
+      "description": "Extra cost of re-tuning hyperparameters (epochs, batch size) when training is split into many sub-models or stages.",
+      "aliases": []
+    },
+    {
+      "id": "storage-overhead",
+      "label": "Checkpoint Storage Overhead",
+      "type": "problem",
+      "description": "Extra disk space needed to store intermediate model states to allow partial retraining.",
+      "aliases": [
+        "storage cost"
+      ]
+    },
+    {
+      "id": "unlearning-verification",
+      "label": "Unlearning Verification",
+      "type": "problem",
+      "description": "Difficulty for a data owner or auditor to confirm that a provider really removed their data's influence from a model.",
+      "aliases": [
+        "verified unlearning",
+        "auditing unlearning"
+      ]
+    },
+    {
+      "id": "unfairness",
+      "label": "Unfairness",
+      "type": "problem",
+      "description": "Systematically worse or biased model outcomes for certain groups of people.",
+      "aliases": [
+        "bias"
+      ]
+    },
+    {
+      "id": "unlearning-guarantee",
+      "label": "Unlearning Guarantee",
+      "type": "theory",
+      "description": "A formal statement of what it means for data to be removed from a model (exact distributional equality, or approximate indistinguishability).",
+      "aliases": []
+    },
+    {
+      "id": "sisa-unlearning-definition",
+      "label": "Distributional Unlearning Definition (Def. III.1)",
+      "type": "theory",
+      "description": "Unlearning holds when the distribution of models from training on D plus a point then unlearning it equals the distribution from training on D alone.",
+      "aliases": [
+        "Definition III.1",
+        "exact unlearning definition"
+      ]
+    },
+    {
+      "id": "plausible-deniability",
+      "label": "Plausible Deniability",
+      "type": "theory",
+      "description": "The ability to argue that an outcome could equally have arisen without a given piece of data.",
+      "aliases": []
+    },
+    {
+      "id": "unlearning-desiderata",
+      "label": "Unlearning Goals G1-G6",
+      "type": "theory",
+      "description": "Requirements for practical unlearning: intelligibility, comparable accuracy, reduced time, provable guarantees, model-agnosticism, limited overhead.",
+      "aliases": [
+        "G1-G6"
+      ]
+    },
+    {
+      "id": "sharding-expected-cost",
+      "label": "Expected Retraining Cost of Sharding",
+      "type": "theory",
+      "description": "Closed-form expected number of points to retrain under uniform sharding for sequential (E[C] = (N/S + 1/(2S) - 1)K - K^2/(2S)) and batched (E[C] = N(1-(1-1/S)^K) - K) requests.",
+      "aliases": [
+        "Eq. 2",
+        "Eq. 3"
+      ]
+    },
+    {
+      "id": "slicing-expected-cost",
+      "label": "Expected Retraining Cost of Slicing",
+      "type": "theory",
+      "description": "Expected retraining work with R slices: e'D(2/3 + 1/(3R)) for a single request (at most 1.5x speed-up) and a min-index formula for batches.",
+      "aliases": [
+        "Eq. 4",
+        "Eq. 5"
+      ]
+    },
+    {
+      "id": "epoch-recalibration",
+      "label": "Slice Epoch Recalibration",
+      "type": "theory",
+      "description": "Choosing total epochs e = 2R e'/(R+1) for sliced training so its compute equals unsliced training for e' epochs.",
+      "aliases": [
+        "Eq. 1"
+      ]
+    },
+    {
+      "id": "retraining-time-linearity",
+      "label": "Linear Retraining-Time Model",
+      "type": "theory",
+      "description": "The empirical observation that training time grows linearly in the number of training samples, which makes sample count a proxy for time.",
+      "aliases": []
+    },
+    {
+      "id": "mnist",
+      "label": "MNIST",
+      "type": "dataset",
+      "description": "60k 28x28 grayscale handwritten digit images, 10 classes.",
+      "aliases": []
+    },
+    {
+      "id": "purchase",
+      "label": "Purchase",
+      "type": "dataset",
+      "description": "Tabular shopping-history dataset (Shokri et al. style; 600 binary purchase features); class count varies by variant (Purchase-2 ... Purchase-100).",
+      "aliases": [
+        "Purchase dataset"
+      ]
+    },
+    {
+      "id": "svhn",
+      "label": "SVHN",
+      "type": "dataset",
+      "description": "Street View House Numbers: about 600k 32x32 colour digit images, 10 classes.",
+      "aliases": []
+    },
+    {
+      "id": "cifar-100",
+      "label": "CIFAR-100",
+      "type": "dataset",
+      "description": "60k 32x32 colour images in 100 classes.",
+      "aliases": []
+    },
+    {
+      "id": "imagenet",
+      "label": "ImageNet",
+      "type": "dataset",
+      "description": "ILSVRC large-scale image classification benchmark with about 1.28M images and 1000 classes.",
+      "aliases": [
+        "ILSVRC-2012"
+      ]
+    },
+    {
+      "id": "mini-imagenet",
+      "label": "Mini-ImageNet",
+      "type": "dataset",
+      "description": "A 100-class subset of ImageNet (Vinyals et al.), often used for few-shot learning but usable as a supervised benchmark.",
+      "aliases": []
+    },
+    {
+      "id": "cnn",
+      "label": "CNN",
+      "type": "model",
+      "description": "Convolutional neural network.",
+      "aliases": [
+        "convolutional network"
+      ]
+    },
+    {
+      "id": "mlp",
+      "label": "MLP",
+      "type": "model",
+      "description": "Multilayer perceptron of fully connected layers.",
+      "aliases": [
+        "fully connected network"
+      ]
+    },
+    {
+      "id": "wide-resnet",
+      "label": "Wide ResNet",
+      "type": "model",
+      "description": "Residual network variant with fewer but wider layers.",
+      "aliases": [
+        "WRN",
+        "Wide ResNet-1-1"
+      ]
+    },
+    {
+      "id": "resnet-50",
+      "label": "ResNet-50",
+      "type": "model",
+      "description": "50-layer residual convolutional neural network.",
+      "aliases": []
+    },
+    {
+      "id": "decision-tree",
+      "label": "Decision Tree",
+      "type": "model",
+      "description": "Model built by greedily choosing feature splits (e.g. by Gini impurity); training is not naturally incremental.",
+      "aliases": []
+    },
+    {
+      "id": "accuracy",
+      "label": "Accuracy",
+      "type": "metric",
+      "description": "Fraction of correctly classified test examples (top-1).",
+      "aliases": [
+        "top-1 accuracy",
+        "test accuracy"
+      ]
+    },
+    {
+      "id": "top-5-accuracy",
+      "label": "Top-5 Accuracy",
+      "type": "metric",
+      "description": "Fraction of test examples whose true label is among the model's five highest-scoring classes.",
+      "aliases": []
+    },
+    {
+      "id": "speedup",
+      "label": "Speed-up",
+      "type": "metric",
+      "description": "Ratio of baseline (e.g. full retraining) time to the method's unlearning time.",
+      "aliases": [
+        "speed-up"
+      ]
+    },
+    {
+      "id": "unlearning-time",
+      "label": "Unlearning Time",
+      "type": "metric",
+      "description": "Wall-clock or compute time needed to process deletion requests.",
+      "aliases": [
+        "retraining time"
+      ]
+    },
+    {
+      "id": "points-to-retrain",
+      "label": "Number of Points to Retrain",
+      "type": "metric",
+      "description": "Count of training samples that must be reprocessed to honour deletion requests; a hardware-independent proxy for unlearning time.",
+      "aliases": [
+        "retraining cost E[C]"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "sisa",
+      "relation": "proposes",
+      "note": "Introduces SISA training as a practical exact-unlearning framework.",
+      "evidence": "Sec. IV: 'We present, SISA (or Sharded, Isolated, Sliced, Aggregated) training'"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "distribution-aware-sharding",
+      "relation": "proposes",
+      "note": "Proposes Algorithm 1 to exploit a known prior over unlearning requests.",
+      "evidence": "Sec. VIII-B, Algorithm 1"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "sisa-unlearning-definition",
+      "relation": "proposes",
+      "note": "Formulates a distribution-level definition of unlearning that allows for training randomness.",
+      "evidence": "Definition III.1"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "unlearning-desiderata",
+      "relation": "proposes",
+      "note": "Lists goals G1-G6 for any unlearning strategy and uses them to reject strawman approaches.",
+      "evidence": "Sec. III-C"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "epoch-recalibration",
+      "relation": "proposes",
+      "note": "Derives how many epochs sliced training needs to match unsliced training time.",
+      "evidence": "Eq. 1"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "sharding-expected-cost",
+      "relation": "proves",
+      "note": "Derives expected retraining cost of sharding for sequential and batched requests.",
+      "evidence": "Eqs. 2-3, App. D-E"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "slicing-expected-cost",
+      "relation": "proves",
+      "note": "Derives expected retraining cost of slicing, showing at most 1.5x expected gain for one request.",
+      "evidence": "Eqs. 4-5, App. F-H"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "retraining-time-linearity",
+      "relation": "proves",
+      "note": "Empirically validates the linear time-vs-samples relation that justifies the cost proxy.",
+      "evidence": "Fig. 3, Sec. V-A"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "machine-unlearning",
+      "relation": "addresses",
+      "note": "Studies how to make DNNs forget training points efficiently and provably.",
+      "evidence": "Title; Sec. I"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "unlearning-cost",
+      "relation": "addresses",
+      "note": "The central goal is to cut the time of retraining from scratch after deletion.",
+      "evidence": "Abstract: 'reduces the computational overhead associated with unlearning'"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "right-to-be-forgotten",
+      "relation": "motivated_by",
+      "note": "Motivated by the GDPR, CCPA and PIPEDA erasure provisions.",
+      "evidence": "Sec. I: 'so-called right to be forgotten'"
+    },
+    {
+      "source": "data-sharding",
+      "target": "sisa",
+      "relation": "part_of",
+      "note": "S: data split into S disjoint shards, each training its own constituent model.",
+      "evidence": "Sec. IV-B.1"
+    },
+    {
+      "source": "shard-isolation",
+      "target": "sisa",
+      "relation": "part_of",
+      "note": "I: no gradient or parameter flow between constituents, which confines each point's influence.",
+      "evidence": "Sec. IV-B.2"
+    },
+    {
+      "source": "data-slicing",
+      "target": "sisa",
+      "relation": "part_of",
+      "note": "S: each shard split into R slices trained incrementally, with saved states.",
+      "evidence": "Sec. IV-B.3"
+    },
+    {
+      "source": "model-ensembling",
+      "target": "sisa",
+      "relation": "part_of",
+      "note": "A: constituent predictions aggregated at inference without using training data.",
+      "evidence": "Sec. IV-B.4"
+    },
+    {
+      "source": "checkpointing",
+      "target": "data-slicing",
+      "relation": "part_of",
+      "note": "Parameters are saved before each new slice so retraining can resume from the last clean state.",
+      "evidence": "Fig. 2 caption"
+    },
+    {
+      "source": "majority-vote-aggregation",
+      "target": "model-ensembling",
+      "relation": "is_a",
+      "note": "Default SISA aggregation, argued optimal without knowledge of which points will be deleted.",
+      "evidence": "Sec. IV-B.4"
+    },
+    {
+      "source": "prediction-vector-aggregation",
+      "target": "model-ensembling",
+      "relation": "is_a",
+      "note": "Averaging softmax vectors keeps runner-up class information.",
+      "evidence": "Sec. VII-A, App. J"
+    },
+    {
+      "source": "learned-aggregation-controller",
+      "target": "model-ensembling",
+      "relation": "is_a",
+      "note": "Considered as an aggregator but rejected.",
+      "evidence": "Sec. IV-B.4, ref [41]"
+    },
+    {
+      "source": "sisa",
+      "target": "majority-vote-aggregation",
+      "relation": "uses",
+      "note": "Uses a simple label-based majority vote by default.",
+      "evidence": "Sec. IV-B.4"
+    },
+    {
+      "source": "prediction-vector-aggregation",
+      "target": "utility-degradation",
+      "relation": "mitigates",
+      "note": "On ImageNet it improves top-1 by 1.68 PP and top-5 by 4.37 PP over label voting.",
+      "evidence": "Sec. VII-A, Fig. 14a"
+    },
+    {
+      "source": "learned-aggregation-controller",
+      "target": "unlearning-cost",
+      "relation": "causes",
+      "note": "Rejected because the controller itself would need retraining if its training data were deleted; the accuracy gain was modest.",
+      "evidence": "Sec. IV-B.4"
+    },
+    {
+      "source": "sisa",
+      "target": "exact-unlearning",
+      "relation": "is_a",
+      "note": "Retraining the affected constituent from a clean checkpoint yields exactly the model distribution of training without the point.",
+      "evidence": "Sec. III, IV"
+    },
+    {
+      "source": "exact-unlearning",
+      "target": "machine-unlearning",
+      "relation": "is_a",
+      "note": "SISA targets the strong, exact form of unlearning.",
+      "evidence": "Sec. I"
+    },
+    {
+      "source": "approximate-unlearning",
+      "target": "machine-unlearning",
+      "relation": "is_a",
+      "note": "The weaker form of unlearning, which the paper contrasts with its own approach.",
+      "evidence": "Sec. III-D"
+    },
+    {
+      "source": "certified-unlearning",
+      "target": "approximate-unlearning",
+      "relation": "is_a",
+      "note": "Certified removal relaxes DP to give probabilistic removal certificates.",
+      "evidence": "Sec. III-D.2"
+    },
+    {
+      "source": "sisa",
+      "target": "approximate-unlearning",
+      "relation": "contrasts_with",
+      "note": "SISA gives a deterministic, exact guarantee instead of probabilistic bounds.",
+      "evidence": "Sec. III-D.2: 'their guarantees are probabilistic'"
+    },
+    {
+      "source": "retrain-from-scratch",
+      "target": "exact-unlearning",
+      "relation": "is_a",
+      "note": "Called the baseline strategy; trivially exact but expensive.",
+      "evidence": "Sec. III-C"
+    },
+    {
+      "source": "lone-shard-baseline",
+      "target": "exact-unlearning",
+      "relation": "is_a",
+      "note": "Exact because it only ever retrains on the remaining data; cheaper but much less accurate.",
+      "evidence": "App. I"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "retrain-from-scratch",
+      "relation": "compares_against",
+      "note": "The batch K baseline (SISA with S = R = 1); SISA is 4.63x faster on Purchase and 2.45x on SVHN.",
+      "evidence": "Sec. I, VI-B"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "lone-shard-baseline",
+      "relation": "compares_against",
+      "note": "The 1/S fraction baseline is S times faster to unlearn but loses much more accuracy.",
+      "evidence": "Sec. VII-A, App. I"
+    },
+    {
+      "source": "sisa",
+      "target": "batched-unlearning",
+      "relation": "uses",
+      "note": "Experiments run in the batch setting; the analysis covers both sequential and batched processing.",
+      "evidence": "Sec. VII-A: 'SISA training is performed in the batch setting'"
+    },
+    {
+      "source": "sharding-expected-cost",
+      "target": "batched-unlearning",
+      "relation": "uses",
+      "note": "Eq. 3 models a batch of K requests with Binomial(K, 1/S) hits per shard.",
+      "evidence": "Eq. 3, App. E"
+    },
+    {
+      "source": "sisa",
+      "target": "unlearning-cost",
+      "relation": "mitigates",
+      "note": "Only one constituent, from its affected slice onward, is retrained per request.",
+      "evidence": "Fig. 2"
+    },
+    {
+      "source": "data-sharding",
+      "target": "unlearning-cost",
+      "relation": "mitigates",
+      "note": "Expected speed-up of S for a single request, falling to no gain once K > 3S.",
+      "evidence": "Sec. IV-B.1, VII-A"
+    },
+    {
+      "source": "data-slicing",
+      "target": "unlearning-cost",
+      "relation": "mitigates",
+      "note": "Restarts retraining from a checkpoint instead of random initialization; best case (R+1)/2, expected at most 1.5x.",
+      "evidence": "Sec. IV-B.3, Eq. 4"
+    },
+    {
+      "source": "distribution-aware-sharding",
+      "target": "unlearning-cost",
+      "relation": "mitigates",
+      "note": "Concentrates high-probability deletions into few small shards, lowering expected points to retrain on SVHN.",
+      "evidence": "Fig. 10"
+    },
+    {
+      "source": "distribution-aware-sharding",
+      "target": "data-sharding",
+      "relation": "extends",
+      "note": "Replaces uniform partitioning with filling shards in order of p(u) until E(chi_i) >= C.",
+      "evidence": "Algorithm 1"
+    },
+    {
+      "source": "distribution-aware-sharding",
+      "target": "utility-degradation",
+      "relation": "suffers_from",
+      "note": "Unequal shard sizes give 94.4% vs 95.7% accuracy under majority vote.",
+      "evidence": "Sec. VIII-B.b"
+    },
+    {
+      "source": "distribution-aware-sharding",
+      "target": "unfairness",
+      "relation": "causes",
+      "note": "Grouping users likely to request deletion (e.g. groups the model is biased against) may harm fair predictions.",
+      "evidence": "Sec. VIII: 'it may also harm fair predictions'"
+    },
+    {
+      "source": "sisa",
+      "target": "weak-learners",
+      "relation": "suffers_from",
+      "note": "Each constituent sees only N/S points and may overfit, especially with few samples per class.",
+      "evidence": "Sec. IV-C.1"
+    },
+    {
+      "source": "data-sharding",
+      "target": "weak-learners",
+      "relation": "causes",
+      "note": "More shards means fewer samples per class per shard, so lower accuracy (over 5 PP once S > 20).",
+      "evidence": "Sec. VII-A, Fig. 15"
+    },
+    {
+      "source": "task-complexity",
+      "target": "weak-learners",
+      "relation": "causes",
+      "note": "Complex tasks (ImageNet) suffer far more from sharding than simple ones (Purchase, SVHN).",
+      "evidence": "Sec. IV-C.1, Fig. 6"
+    },
+    {
+      "source": "weak-learners",
+      "target": "utility-degradation",
+      "relation": "causes",
+      "note": "ImageNet top-5 accuracy drops 16.14-19.45 PP versus the batch K baseline.",
+      "evidence": "Sec. VII-A"
+    },
+    {
+      "source": "transfer-learning",
+      "target": "utility-degradation",
+      "relation": "mitigates",
+      "note": "With an ImageNet-pretrained ResNet-50 transferred to CIFAR-100, at S = 10 the gap is about 4 PP top-1 and under 1 PP top-5.",
+      "evidence": "Sec. VII-C, Fig. 8"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "transfer-learning",
+      "relation": "uses",
+      "note": "Used to close the accuracy gap on complex tasks without changing constituent hyperparameters.",
+      "evidence": "Sec. VII-C"
+    },
+    {
+      "source": "data-replication",
+      "target": "weak-learners",
+      "relation": "mitigates",
+      "note": "Discussed as a way to strengthen small shards, though replicating likely-deleted points raises unlearning cost.",
+      "evidence": "Sec. IX 'Data Replication'"
+    },
+    {
+      "source": "coreset-selection",
+      "target": "unlearning-cost",
+      "relation": "mitigates",
+      "note": "Suggested as future work: a smaller useful subset lowers both learning and unlearning cost.",
+      "evidence": "Sec. IX 'Is All Data Useful?'"
+    },
+    {
+      "source": "data-slicing",
+      "target": "storage-overhead",
+      "relation": "suffers_from",
+      "note": "Storage grows linearly in R, but disk is argued to be far cheaper than GPU time.",
+      "evidence": "App. C"
+    },
+    {
+      "source": "sisa",
+      "target": "hyperparameter-search-overhead",
+      "relation": "suffers_from",
+      "note": "O(SR) models may need tuning (O(R) with uniform shards), and small slices interact with batch size.",
+      "evidence": "Sec. IV-C.2"
+    },
+    {
+      "source": "sisa",
+      "target": "unlearning-verification",
+      "relation": "suffers_from",
+      "note": "Assumes an honest provider; trust rests on auditing the code, since influence cannot be measured.",
+      "evidence": "Sec. IX 'Verified Unlearning'"
+    },
+    {
+      "source": "data-slicing",
+      "target": "stochastic-gradient-descent",
+      "relation": "uses",
+      "note": "Needs a stateful iterative learner that can continue from a saved state when given new data.",
+      "evidence": "Sec. IV-A"
+    },
+    {
+      "source": "data-slicing",
+      "target": "decision-tree",
+      "relation": "contrasts_with",
+      "note": "Greedy tree learning must be rebuilt from scratch when a slice is added, so slicing gives no benefit.",
+      "evidence": "Sec. IV-A"
+    },
+    {
+      "source": "sisa",
+      "target": "ensemble-learning",
+      "relation": "builds_on",
+      "note": "Aggregates constituents like an ensemble, but these are homogeneous and isolated rather than boosted.",
+      "evidence": "Sec. IV-A, IX"
+    },
+    {
+      "source": "shard-isolation",
+      "target": "distributed-training",
+      "relation": "contrasts_with",
+      "note": "Unlike distributed SGD, gradients are never shared between replicas.",
+      "evidence": "Sec. IV-A"
+    },
+    {
+      "source": "sisa",
+      "target": "distributed-training",
+      "relation": "builds_on",
+      "note": "Replicates the model over data partitions like data-parallel training.",
+      "evidence": "Sec. IV-A, refs [37],[38]"
+    },
+    {
+      "source": "sisa-unlearning-definition",
+      "target": "unlearning-guarantee",
+      "relation": "is_a",
+      "note": "Requires distributional equality with training without the point.",
+      "evidence": "Definition III.1"
+    },
+    {
+      "source": "sisa-unlearning-definition",
+      "target": "training-stochasticity",
+      "relation": "addresses",
+      "note": "Defined over distributions because different weights need not mean different data.",
+      "evidence": "Sec. III-B"
+    },
+    {
+      "source": "plausible-deniability",
+      "target": "sisa-unlearning-definition",
+      "relation": "part_of",
+      "note": "The provider must convince the user that the updated model could plausibly have been trained without their data.",
+      "evidence": "Sec. III-B: 'akin to that of plausible deniability'"
+    },
+    {
+      "source": "sisa-unlearning-definition",
+      "target": "poisoning-attack",
+      "relation": "contrasts_with",
+      "note": "The guarantee is stricter than poisoning mitigation needs, so poisoning is out of scope.",
+      "evidence": "Sec. I"
+    },
+    {
+      "source": "sisa-unlearning-definition",
+      "target": "differential-privacy",
+      "relation": "contrasts_with",
+      "note": "DP bounds each point's influence but never to zero; zero influence needs epsilon = 0, which prevents learning.",
+      "evidence": "Sec. III-D.1"
+    },
+    {
+      "source": "differential-privacy",
+      "target": "data-privacy",
+      "relation": "is_a",
+      "note": "Presented as a privacy guarantee different from, and not sufficient for, unlearning.",
+      "evidence": "Sec. I"
+    },
+    {
+      "source": "right-to-be-forgotten",
+      "target": "data-privacy",
+      "relation": "part_of",
+      "note": "Erasure rights are a data-privacy regulation requirement.",
+      "evidence": "Sec. I"
+    },
+    {
+      "source": "machine-unlearning",
+      "target": "training-data-memorization",
+      "relation": "motivated_by",
+      "note": "Because models can memorize data, deleting raw data is not enough.",
+      "evidence": "Sec. I, refs [10],[11]"
+    },
+    {
+      "source": "training-data-memorization",
+      "target": "privacy-leakage",
+      "relation": "causes",
+      "note": "Memorized data exposes users to privacy attacks such as model inversion.",
+      "evidence": "Abstract"
+    },
+    {
+      "source": "machine-unlearning",
+      "target": "training-stochasticity",
+      "relation": "suffers_from",
+      "note": "Random batching, ordering and many local minima make it hard to link a point to the learned hypothesis.",
+      "evidence": "Sec. III-A"
+    },
+    {
+      "source": "influence-functions",
+      "target": "machine-unlearning",
+      "relation": "contrasts_with",
+      "note": "Needs expensive second-order derivatives and does not clearly map a single point's effect to DNN parameters.",
+      "evidence": "Sec. III-A.1"
+    },
+    {
+      "source": "newton-step-certified-removal",
+      "target": "certified-unlearning",
+      "relation": "is_a",
+      "note": "Guo et al.'s one-step Newton update with noise masking, a strawman reviewed here.",
+      "evidence": "Sec. III-D.2"
+    },
+    {
+      "source": "newton-step-certified-removal",
+      "target": "influence-functions",
+      "relation": "uses",
+      "note": "The Newton step is the influence-function approximation of removing a point.",
+      "evidence": "Sec. III-D.2, ref [29]"
+    },
+    {
+      "source": "sisa",
+      "target": "newton-step-certified-removal",
+      "relation": "contrasts_with",
+      "note": "Certified removal gives probabilistic guarantees, suits simple (e.g. linear) models, and needs public pretraining for non-linear ones, so it fails G5.",
+      "evidence": "Sec. III-D.2"
+    },
+    {
+      "source": "sq-unlearning",
+      "target": "statistical-query-learning",
+      "relation": "builds_on",
+      "note": "Cao & Yang unlearn exactly when queries are fixed before learning.",
+      "evidence": "Sec. I, III-D.3"
+    },
+    {
+      "source": "sq-unlearning",
+      "target": "machine-unlearning",
+      "relation": "is_a",
+      "note": "Earlier unlearning approach that motivates SISA.",
+      "evidence": "ref [15]"
+    },
+    {
+      "source": "sisa",
+      "target": "sq-unlearning",
+      "relation": "contrasts_with",
+      "note": "SQ unlearning diverges for adaptive queries (as in DNN training), and efficient SQ versions of complex models do not exist.",
+      "evidence": "Sec. III-D.3, footnote 2"
+    },
+    {
+      "source": "quantized-k-means",
+      "target": "exact-unlearning",
+      "relation": "is_a",
+      "note": "Ginart et al.'s deletion-efficient k-means, reviewed under decremental learning.",
+      "evidence": "Sec. III-D.4"
+    },
+    {
+      "source": "sisa",
+      "target": "quantized-k-means",
+      "relation": "contrasts_with",
+      "note": "Unclear whether Q-k-means generalizes (G5) or scales (G6) to all model classes.",
+      "evidence": "Sec. III-D.4"
+    },
+    {
+      "source": "sisa",
+      "target": "unlearning-desiderata",
+      "relation": "motivated_by",
+      "note": "Designed to be intelligible, provable, model-agnostic and faster than retraining.",
+      "evidence": "Sec. III-C"
+    },
+    {
+      "source": "sharding-expected-cost",
+      "target": "retraining-time-linearity",
+      "relation": "builds_on",
+      "note": "Counts points to retrain, assuming time is linear in samples.",
+      "evidence": "Sec. V-A"
+    },
+    {
+      "source": "slicing-expected-cost",
+      "target": "epoch-recalibration",
+      "relation": "builds_on",
+      "note": "Each slice step is weighted by 2e'/(R+1) epochs from Eq. 1.",
+      "evidence": "Eq. 4, App. F"
+    },
+    {
+      "source": "slicing-expected-cost",
+      "target": "retraining-time-linearity",
+      "relation": "builds_on",
+      "note": "Uses the number of samples processed as the cost.",
+      "evidence": "Sec. V-C"
+    },
+    {
+      "source": "sharding-expected-cost",
+      "target": "data-sharding",
+      "relation": "part_of",
+      "note": "Quantifies the benefit of sharding: about N K/S for small K, approaching N - K in the batched case as K grows.",
+      "evidence": "Eqs. 2-3"
+    },
+    {
+      "source": "slicing-expected-cost",
+      "target": "data-slicing",
+      "relation": "part_of",
+      "note": "Quantifies the slicing benefit: at most 1.5x expected for a single request.",
+      "evidence": "Eq. 4"
+    },
+    {
+      "source": "epoch-recalibration",
+      "target": "data-slicing",
+      "relation": "enables",
+      "note": "With recalibrated epochs, slicing showed no accuracy loss (Fig. 5).",
+      "evidence": "Sec. VII-A.2"
+    },
+    {
+      "source": "retraining-time-linearity",
+      "target": "points-to-retrain",
+      "relation": "enables",
+      "note": "Makes sample count a valid proxy for unlearning time.",
+      "evidence": "Fig. 3"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "mnist",
+      "relation": "evaluates_on",
+      "note": "A simple task: accuracy vs retraining time compared with the baselines.",
+      "evidence": "Fig. 4, Table I"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "purchase",
+      "relation": "evaluates_on",
+      "note": "Simple task; 4.63x speed-up at 8 requests with S = 20, R = 50.",
+      "evidence": "Sec. I, Table I"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "svhn",
+      "relation": "evaluates_on",
+      "note": "Simple task; 2.45x speed-up at 18 requests; also used for distribution-aware sharding.",
+      "evidence": "Sec. I, Fig. 10"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "cifar-100",
+      "relation": "evaluates_on",
+      "note": "Target task for the transfer-learning experiment from ImageNet.",
+      "evidence": "Sec. VII-C, Fig. 8"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "imagenet",
+      "relation": "evaluates_on",
+      "note": "Complex task; 1.36x speed-up at 39 requests with a 19.45 PP top-5 drop.",
+      "evidence": "Sec. I, Fig. 6a"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "mini-imagenet",
+      "relation": "evaluates_on",
+      "note": "Complex task; 8.01x speed-up at 4 requests with a 16.7 PP accuracy drop.",
+      "evidence": "Footnote 1, Fig. 6b"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "cnn",
+      "relation": "uses",
+      "note": "2 conv + 2 FC layer network for MNIST.",
+      "evidence": "Table II"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "mlp",
+      "relation": "uses",
+      "note": "2 fully connected layers for Purchase.",
+      "evidence": "Table II"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "wide-resnet",
+      "relation": "uses",
+      "note": "Wide ResNet-1-1 for SVHN.",
+      "evidence": "Table II"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "resnet-50",
+      "relation": "uses",
+      "note": "ResNet-50 for CIFAR-100, ImageNet and Mini-ImageNet.",
+      "evidence": "Table II"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "accuracy",
+      "relation": "measures_with",
+      "note": "Top-1 test accuracy of the aggregated ensemble against the baselines.",
+      "evidence": "Figs. 4, 6, 8"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "top-5-accuracy",
+      "relation": "measures_with",
+      "note": "Used for complex tasks (ImageNet, CIFAR-100 transfer).",
+      "evidence": "Sec. VII-A, VII-C"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "speedup",
+      "relation": "measures_with",
+      "note": "Retraining speed-up over the batch K baseline as S, R and K vary.",
+      "evidence": "Fig. 7, Fig. 11"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "points-to-retrain",
+      "relation": "measures_with",
+      "note": "Main analytical cost measure E[C].",
+      "evidence": "Sec. V, Fig. 10, Fig. 12"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "unlearning-time",
+      "relation": "measures_with",
+      "note": "Reported as analytical retraining time derived from sample counts.",
+      "evidence": "Fig. 4 axis 'Analytical Time(s)'"
+    },
+    {
+      "source": "bourtoule2021-sisa",
+      "target": "task-complexity",
+      "relation": "addresses",
+      "note": "Splits the evaluation into simple (MNIST, Purchase, SVHN) and complex (CIFAR-100, ImageNet, Mini-ImageNet) tasks.",
+      "evidence": "Sec. VI-A"
+    }
+  ],
+  "cross_paper": [
+    {
+      "target_paper": "ginart2019-deletion",
+      "relation": "cites",
+      "note": "SISA cites Ginart et al. (ref [36]) under 'decremental learning'. It credits them with a formal deletion definition and noting that deletion and privacy are orthogonal, but doubts that Q-k-means generalizes (G5) or scales (G6) beyond k-means.",
+      "explicit": true
+    },
+    {
+      "target_paper": "ginart2019-deletion",
+      "relation": "complementary",
+      "note": "Both give exact deletion through partitioning and isolation. Ginart's DC-k-means divide-and-conquer tree is closely related to SISA sharding, and Ginart's deletion-efficiency notion complements SISA's expected retraining cost analysis.",
+      "explicit": false
+    },
+    {
+      "target_paper": "kadhe2023-fairsisa",
+      "relation": "builds_on",
+      "note": "Reverse direction: FairSISA builds on SISA, adding ensemble post-processing to fix the unfairness that SISA sharding can introduce. SISA itself warns that grouping likely-deleters into shards may harm fair predictions.",
+      "explicit": false
+    },
+    {
+      "target_paper": "wen2026-fedshard",
+      "relation": "builds_on",
+      "note": "Reverse direction (inferred from the title): FedShard brings SISA-style sharding into federated unlearning and adds efficiency and performance fairness across clients.",
+      "explicit": false
+    },
+    {
+      "target_paper": "pan2023-mufc",
+      "relation": "same_problem",
+      "note": "Both pursue exact, efficient unlearning that avoids full retraining; MUFC does it for federated clustering, and SISA is a standard reference point (inferred).",
+      "explicit": false
+    },
+    {
+      "target_paper": "adhikari2025-uncle",
+      "relation": "same_problem",
+      "note": "UnCLe studies unlearning in continual learning. SISA's slice-wise incremental training with checkpoints is a natural exact-unlearning reference when data arrives in stages (inferred).",
+      "explicit": false
+    },
+    {
+      "target_paper": "rachapudi2026-bidlora",
+      "relation": "complementary",
+      "note": "BID-LoRA targets parameter-efficient continual learning and unlearning. LoRA-style adapters could cut SISA's per-slice checkpoint storage and per-shard retraining cost (inferred, not stated in either paper).",
+      "explicit": false
+    }
+  ]
+}
