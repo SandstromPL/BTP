@@ -87,14 +87,13 @@ MFC and p-FClus come from the same IIT Ropar group (Jain, Gupta). MUFSC shares a
 - MeCo: its forgetting numbers for FedAvg are inconsistent across two tables. The "meta-learning" step is a first-order alternating update, not true MAML.
 - MUFSC: the 35.8× headline comes from a separate compact implementation (ordinary direct replay at T = 0 is 17.8×); timings are in-memory request times for one preselected client per dataset (Bank's 115× reflects only 20 clients). Certificates almost never help (they give up at round zero in 174/175 and 92/95 trials). Groups are SEX only for Adult and ACS (Bank: married vs not; Credit: education). The authors state heavy generative-AI use, including for proofs (some checked in Lean 4).
 
-## Open ideas for the graph page (not implemented)
+## Network view (ring layout, implemented 2026-10-24)
 
-The page is cluttered (437 concepts, 1106 links at once). Suggested fixes, in priority order:
-1. Open with "Shared by 2+" and hide datasets, metrics and models by default.
-2. Draw links only on hover or select; keep citation arrows always visible.
-3. Collapse each paper's own concepts into one expandable bubble.
-4. Focus mode that hides everything outside a paper's neighbourhood; add a compare-two-papers mode.
-5. Fixed layout with one region per folder.
-6. One view per concept type.
-7. Prune one-off nodes.
-The recommended first step was 1 + 2 + 3 together.
+The old force-directed hairball (437 concepts, 1106 links at once) was replaced:
+- Papers sit on a fixed ring in folder arcs; the order is optimised so papers sharing the most concepts are neighbours.
+- Concepts shared by 2+ papers sit inside the ring at the average position of their papers; each paper's own concepts are
+  collapsed into a "+n" badge. Datasets, metrics and models are hidden by default (legend chips toggle them).
+- No links at rest except dashed citation arrows; hovering shows a node's spokes.
+- Clicking a paper fans its own concepts out in an arc with outward labels; clicking a concept lights up its papers and linked concepts.
+- Compare mode (paper panel "Compare with…" chips, or the Overlap matrix) shows only two papers and the concepts they share.
+- "Show: Everything" fans out every paper's own concepts. Labels are placed by priority and skipped when they would overlap.
