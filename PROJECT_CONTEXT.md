@@ -61,10 +61,11 @@ MFC and p-FClus come from the same IIT Ropar group (Jain, Gupta). MUFSC shares a
 
 1. **Fast per-record deletion for federated fair k-means (extend MUFSC).** Build a deletion-stable seeded k-means++ sampler (e.g. per-record random keys, the paper's own suggestion) so most deletions leave chosen centres unchanged; combine with DC-k-means partitions or Q-k-means quantization for refinement rounds. Theory: bound the expected per-record unlearning cost (MUFC Thm 5.4 / Ginart amortized style) while keeping same-seed exactness. Laptop; MUFSC's public code is the baseline.
 2. **Exact unlearning for multi-round federated clustering (MFC).** Checkpoint the server state per round and quantize uploaded centres; MUFSC's exact replay of refinement rounds is a template. Theory: bound the expected number of rounds a deletion forces you to recompute. Laptop.
-3. **Client-fair clustering under unlearning.** MUFSC keeps demographic-group fairness exact; nobody checks whether deleting one client hurts the remaining clients unevenly (p-FClus/MFC's fairness, FedShard's Mp/Me). Laptop.
-4. **Make MUFC fully incremental.** Its server reruns k-means++ and Lloyd's from scratch; clients skip Lloyd's. Extend the Lemma 5.1 argument.
-5. **Cost-fair SISA:** spread unlearning cost evenly across shards/slices. Mostly empirical; needs a GPU.
-6. **Federated continual unlearning (MeCo + UnCLe/BID-LoRA).** Little theory available; heavy deep learning.
+3. **Exact unlearning for multi-round federated clustering** (original pre-MUFSC card, kept verbatim at the user's request). One-shot MUFC is cheap to unlearn, but MFC's later rounds tie every client to every other through the global centres. Approach: save the server state after every round and quantize the uploaded centres (as Q-k-means does), so most deletions change nothing. Theory: prove a bound on the expected number of rounds a deletion forces you to recompute. Laptop. Builds on MFC, MUFC, Making AI Forget You.
+4. **Client-fair clustering under unlearning.** MUFSC keeps demographic-group fairness exact; nobody checks whether deleting one client hurts the remaining clients unevenly (p-FClus/MFC's fairness, FedShard's Mp/Me). Laptop.
+5. **Make MUFC fully incremental.** Its server reruns k-means++ and Lloyd's from scratch; clients skip Lloyd's. Extend the Lemma 5.1 argument.
+6. **Cost-fair SISA:** spread unlearning cost evenly across shards/slices. Mostly empirical; needs a GPU.
+7. **Federated continual unlearning (MeCo + UnCLe/BID-LoRA).** Little theory available; heavy deep learning.
 
 **Recommendation:** start with 1 (fallback: 2). First steps:
 1. Read MUFSC closely, alongside MUFC and Ginart (the three exact clustering-unlearning papers).
