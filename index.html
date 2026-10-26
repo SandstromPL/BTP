@@ -248,7 +248,11 @@ h1 .strike::after {
 .cite.hl { stroke-opacity: .95; stroke-width: 2; }
 .spoke { fill: none; stroke: var(--ink); stroke-opacity: .38; stroke-width: 1.1; }
 .clink { fill: none; stroke: var(--ink-2); stroke-opacity: .7; stroke-width: 1.1; stroke-dasharray: 3 3; }
-.spokes { transition: opacity .2s; }
+.spokes, .plinks, .ptags { transition: opacity .2s; }
+.plink { fill: none; stroke: var(--ink); stroke-opacity: .2; stroke-linecap: round; pointer-events: none; transition: stroke-opacity .15s; }
+.plink.hot { stroke-opacity: .6; }
+.plink-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.ptag { font-family: var(--font-mono); font-size: calc(10px * var(--as, 1)); font-weight: 600; fill: var(--ink-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .arc { fill: var(--line-2); }
 .color-batch .arc.b-1 { fill: var(--c-b1); }
 .color-batch .arc.b-2 { fill: var(--c-b2); }
@@ -758,10 +762,13 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
     .append("path").attr("d", "M0,-4L8,0L0,4").attr("fill", "var(--ink)");
   const root = svg.append("g").attr("class", "root");
   const gArcs = root.append("g").attr("class", "arcs");
+  const gPLinks = root.append("g").attr("class", "plinks");
   const gCites = root.append("g");
   const gSpokes = root.append("g").attr("class", "spokes");
   const gConcepts = root.append("g");
   const gPapers = root.append("g");
+  const gTags = root.append("g").attr("class", "ptags");
+  const lateLayers = d3.selectAll([gSpokes.node(), gPLinks.node(), gTags.node()]);
 
   const R = 340;
   const isPrivate = n => n.type !== "paper" && n.papers.length === 1;
@@ -1012,7 +1019,7 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
     root.attr("transform", e.transform);
     if (e.sourceEvent) userMoved = true;
     if (Math.abs(e.transform.k - zk) > 0.01) {
-      zk = e.transform.k; setViewScale(zk);
+      zk = e.transform.k; setViewScale(zk); positionTags();
       if (performance.now() > movingUntil) { nodeSel.attr("transform", nodeTransform); citeSel.attr("d", citePath); }
     }
     scheduleCull();
@@ -1084,6 +1091,12 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
       const [sx, sy] = t.apply([p.x, p.y]), hw = p.w / 2 * viewScale.paper * k + 3, hh = p.h / 2 * viewScale.paper * k + 2;
       hard.push([sx - hw, sy - hh, sx + hw, sy + hh]);
     }
+    // "n shared" tags of a focused paper keep their spot; concept labels move or drop instead
+    if (f && f.plinks) for (const [, id] of f.plinks) {
+      const [sx, sy] = t.apply(tagPos(id)), fz = Math.max(1, k);
+      const w = (`${DATA.pairShared[f.paper][id].length} shared`.length * 6.2 + 6) * fz, h = 13 * fz;
+      hard.push([sx - w / 2, sy - h / 2, sx + w / 2, sy + h / 2]);
+    }
     const show = new Map(), rest = [];
     for (const n of conceptNodes) {
       if (!isVisible(n)) continue;
@@ -1130,7 +1143,8 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
       const n = nodeById.get(id);
       if (n.type === "paper") {
         const cs = conceptNodes.filter(c => c.papers.includes(id) && isVisible(c)).map(c => c.id);
-        return { nodes: new Set([id, ...cs]), spokes: cs.map(c => [id, c]), clinks: [] };
+        const peers = papers.filter(o => o.id !== id && DATA.pairShared[id][o.id].length > 0).map(o => o.id);
+        return { nodes: new Set([id, ...cs, ...peers]), spokes: cs.map(c => [id, c]), clinks: [], paper: id, plinks: peers.map(o => [id, o]) };
       }
       const nb = conceptLinks.filter(l => l.source === id || l.target === id).map(l => l.source === id ? l.target : l.source)
         .filter(x => isVisible(nodeById.get(x)));
@@ -1153,6 +1167,30 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
     if (t.fan) return `M${s.x},${s.y}L${t.x},${t.y}`;
     return `M${s.x},${s.y}Q${(s.x + t.x) / 2 * 0.78},${(s.y + t.y) / 2 * 0.78} ${t.x},${t.y}`;
   }
+  function plinkPath([a, b]) {
+    const s = nodeById.get(a), t = nodeById.get(b);
+    return `M${s.x},${s.y}Q${(s.x + t.x) / 2 * 0.35},${(s.y + t.y) / 2 * 0.35} ${t.x},${t.y}`;
+  }
+  // "n shared" tag on the inner side of each linked paper's pill
+  function tagPos(id) {
+    const o = nodeById.get(id), len = Math.hypot(o.x, o.y) || 1, ux = -o.x / len, uy = -o.y / len;
+    const ps = viewScale.paper, as = Math.min(2.4, Math.max(1, 1 / zk));
+    const hw = (o.w / 2 + 4) * ps, hh = (o.h / 2 + 4) * ps, k = 1 / Math.sqrt((ux * ux) / (hw * hw) + (uy * uy) / (hh * hh));
+    return [o.x + ux * (k + 9 * as), o.y + uy * (k + 9 * as)];
+  }
+  function positionTags() {
+    gTags.selectAll("text.ptag").attr("x", d => tagPos(d[1])[0]).attr("y", d => tagPos(d[1])[1]);
+  }
+  function pairTip(evt, [a, b]) {
+    const A = paperById.get(a), B = paperById.get(b), n = DATA.pairShared[a][b].length;
+    const cit = DATA.citations.filter(c => (c.source === a && c.target === b) || (c.source === b && c.target === a));
+    tip.replaceChildren(
+      el("span", { class: "meta", text: `${n} shared concept${n === 1 ? "" : "s"}` + (cit.length ? " · " + cit.map(c => `${paperById.get(c.source).short} cites ${paperById.get(c.target).short}`).join(", ") : " · no citation") }),
+      el("strong", { text: `${A.short} ↔ ${B.short}` }),
+      el("p", { text: "Click the line to compare the two papers." }));
+    tip.hidden = false;
+    moveTip(evt);
+  }
   let focusNow = null;
   function drawSpokes() {
     const f = focusNow;
@@ -1160,6 +1198,23 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
     gSpokes.selectAll("path.spoke").data(sp, d => d.join("|")).join("path").attr("class", "spoke").attr("d", spokePath);
     gSpokes.selectAll("path.clink").data(f ? f.clinks : [], d => d.join("|")).join("path").attr("class", "clink")
       .attr("d", d => { const a = nodeById.get(d[0]), b = nodeById.get(d[1]); return `M${a.x},${a.y}L${b.x},${b.y}`; });
+    // paper-to-paper lines: thicker = more shared concepts
+    const pl = f && f.plinks ? f.plinks : [];
+    const most = d3.max(pl, ([a, b]) => DATA.pairShared[a][b].length) || 1;
+    const key = d => d.join("|");
+    gPLinks.selectAll("path.plink").data(pl, key).join("path").attr("class", "plink")
+      .attr("d", plinkPath).attr("stroke-width", ([a, b]) => 1 + 5 * DATA.pairShared[a][b].length / most);
+    gPLinks.selectAll("path.plink-hit").data(pl, key)
+      .join(enter => enter.append("path").attr("class", "plink-hit")
+        .on("pointerenter", (e, d) => { gPLinks.selectAll("path.plink").classed("hot", x => key(x) === key(d)); pairTip(e, d); })
+        .on("pointermove", e => moveTip(e))
+        .on("pointerleave", () => { gPLinks.selectAll("path.plink").classed("hot", false); tip.hidden = true; })
+        .on("click", (e, d) => { e.stopPropagation(); tip.hidden = true; compare(d[0], d[1]); }))
+      .attr("d", plinkPath);
+    gTags.selectAll("text.ptag").data(pl, key).join("text").attr("class", "ptag")
+      .attr("text-anchor", "middle").attr("dy", "0.35em")
+      .text(([a, b]) => `${DATA.pairShared[a][b].length} shared`);
+    positionTags();
   }
   function applyFocus() {
     const f = focusNow = focusState();
@@ -1167,7 +1222,8 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
     nodeSel.classed("on", d => !!f && f.nodes.has(d.id))
       .classed("sel", d => d.id === state.selected || (!!state.compare && state.compare.includes(d.id)));
     drawSpokes();
-    citeSel.classed("hl", d => !!f && f.nodes.has(d.source.id) && f.nodes.has(d.target.id));
+    citeSel.classed("hl", d => !!f && (f.paper ? d.source.id === f.paper || d.target.id === f.paper
+      : f.nodes.has(d.source.id) && f.nodes.has(d.target.id)));
     scheduleCull();
   }
   function drawBadges() {
@@ -1223,15 +1279,16 @@ const DATA = {"papers":[{"id":"bourtoule2021-sisa","title":"Machine Unlearning",
     // spokes are drawn at the final positions, so show them once the marks have arrived
     const token = ++updateToken;
     if (animated) {
-      gSpokes.attr("opacity", 0);
+      lateLayers.attr("opacity", 0);
       setTimeout(() => {
         if (token !== updateToken) return;
-        gSpokes.attr("opacity", null);
+        lateLayers.attr("opacity", null);
+        positionTags();
         nodeSel.attr("transform", nodeTransform);
         citeSel.attr("d", citePath);
         scheduleCull();
       }, DUR + 60);
-    } else gSpokes.attr("opacity", null);
+    } else lateLayers.attr("opacity", null);
   }
   function applyVisibility() { update(true); }
 
