@@ -7,7 +7,7 @@ Last updated 2026-11-10.
 ## Status
 
 - The professor shared 11 papers in four batches (`papers/1` to `papers/4`), then (Nov 2026) gave a concrete direction to implement.
-- The implementation lives in `UnLearning/`, a **private** repo (https://github.com/SandstromPL/UnLearning) included as a git submodule. Its `README.md` lists the professor's material; the local, gitignored `UnLearning/INITIAL_DISCUSSION.md` holds the first analysis. Keep method details out of this public repo.
+- The implementation lives in `UnLearning/`, a **private** repo (https://github.com/SandstromPL/UnLearning) included as a git submodule. Its `README.md` lists the professor's material; `UnLearning/INITIAL_DISCUSSION.md` (in the private repo) holds the first analysis. Keep method details out of this public repo.
 - Each paper was read in full (including appendices) and turned into structured notes, then merged into one knowledge graph.
 - The graph is live at **https://sandstrompl.github.io/BTP/** (`index.html` in this repo). It has three tabs: Network, Overlap matrix, Directions (`#matrix`, `#directions` open them directly).
 - A copy is also published as a private Claude artifact: https://claude.ai/artifact/Ec4CSFyCLJL95jVV2XouvT
