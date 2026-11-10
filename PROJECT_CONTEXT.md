@@ -11,7 +11,7 @@ Last updated 2026-11-10.
 - Each paper was read in full (including appendices) and turned into structured notes, then merged into one knowledge graph.
 - The graph is live at **https://sandstrompl.github.io/BTP/** (`index.html` in this repo). It has three tabs: Network, Overlap matrix, Directions (`#matrix`, `#directions` open them directly).
 - A copy is also published as a private Claude artifact: https://claude.ai/artifact/Ec4CSFyCLJL95jVV2XouvT
-- Repo: https://github.com/SandstromPL/BTP (GitHub Pages serves `main`, root).
+- Repo: https://github.com/SandstromPL/BTP. GitHub Pages is deployed from `main` (root) by the Actions workflow `.github/workflows/pages.yml`, which skips the private submodule; the legacy branch build failed on it.
 
 ## Files
 
