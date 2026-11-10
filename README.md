@@ -8,3 +8,4 @@ Knowledge graph of the reading list: https://sandstrompl.github.io/BTP/
 - `knowledge-graph/knowledge-graph.json` — merged graph data (papers, concepts, links, citations)
 - `knowledge-graph/per-paper/` — detailed notes extracted from each paper
 - `papers/` — the papers, in the three folders they were shared in
+- `UnLearning/` — implementation work, kept in a separate private repo and included here as a git submodule (clone with `git clone --recurse-submodules`; needs access to the private repo)

@@ -2,11 +2,12 @@
 
 BTech Project CSQ301 · **Efficient algorithms for machine unlearning (theory and implementation)**.
 This file summarises earlier work on the project so a new assistant session can continue without the old chat.
-Last updated 2026-10-24.
+Last updated 2026-11-10.
 
 ## Status
 
-- The professor shared 11 papers in four batches (`papers/1` to `papers/4`). No project direction is fixed yet, but folder 4 (MUFSC) points strongly at exact unlearning for federated fair clustering.
+- The professor shared 11 papers in four batches (`papers/1` to `papers/4`), then (Nov 2026) gave a concrete direction to implement.
+- The implementation lives in `UnLearning/`, a **private** repo (https://github.com/SandstromPL/UnLearning) included as a git submodule. Its `README.md` lists the professor's material; the local, gitignored `UnLearning/INITIAL_DISCUSSION.md` holds the first analysis. Keep method details out of this public repo.
 - Each paper was read in full (including appendices) and turned into structured notes, then merged into one knowledge graph.
 - The graph is live at **https://sandstrompl.github.io/BTP/** (`index.html` in this repo). It has three tabs: Network, Overlap matrix, Directions (`#matrix`, `#directions` open them directly).
 - A copy is also published as a private Claude artifact: https://claude.ai/artifact/Ec4CSFyCLJL95jVV2XouvT
@@ -19,6 +20,7 @@ Last updated 2026-10-24.
 | `index.html` | The interactive graph. All data is embedded in it (`const DATA = …`). Loads D3 7.9.0 and Google Fonts from CDNs. |
 | `knowledge-graph/knowledge-graph.json` | Merged graph: `papers`, `nodes` (437 concepts with `type`, `description`, `papers`, per-paper `uses` notes), `links` (1106), `citations` (13), `related`, `pairShared`, `paperOverlap`, `threads`, `directions`. |
 | `knowledge-graph/per-paper/<id>.json` | Detailed notes per paper: summary, problem, core idea, method steps, definitions, theorems, complexity, experiments with numbers, limitations, open questions, relevance to the project. **Best source for paper details.** |
+| `UnLearning/` | Private submodule with the implementation work, the professor's material and the dataset. Commit and push there first, then record the new commit here (`git add UnLearning`). |
 | `papers/` | The PDFs. Note: `papers/2/1_2312.07420v1.pdf` is misnamed. It is UnCLe (arXiv 2509.17530), not FairSISA. |
 
 ## The 11 papers
